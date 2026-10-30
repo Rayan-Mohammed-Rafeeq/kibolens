@@ -11,3 +11,7 @@ No container has Docker socket access in Phase 1. Future infrastructure reads wi
 Phase 2 uses a random opaque session token stored only in an HttpOnly, SameSite=Lax cookie. The database holds an HMAC-SHA-256 hash of that token, its expiry, revocation state, and a separate hashed CSRF token. Browser state-changing requests supply the CSRF token from memory in `X-CSRF-Token`; it is never persisted in local storage. Session hashes use `KIBOLENS_SESSION_HASH_SECRET`.
 
 Conversation queries always include the authenticated `owner_id`. A missing or foreign conversation returns 404, so its existence is not disclosed. The Phase 2 chat UI persists user messages only and explicitly marks agent responses as unavailable.
+
+## Monitoring
+
+The optional `monitoring` Compose profile keeps Prometheus, Node Exporter, cAdvisor, Alertmanager, and Grafana on the private network. FastAPI queries Prometheus with a narrow, versioned service layer; React only consumes FastAPI responses. Prometheus failure, malformed values, and stale timestamps are represented as unavailable evidence and lead to `UNKNOWN`, never `HEALTHY`.
