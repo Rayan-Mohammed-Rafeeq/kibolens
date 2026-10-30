@@ -13,6 +13,11 @@ from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.fixture
 def database() -> Generator[Session]:
     engine = create_engine(
         "sqlite://",
