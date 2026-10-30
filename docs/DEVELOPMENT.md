@@ -16,6 +16,12 @@ uvicorn app.main:app --reload
 
 The liveness endpoint is `GET /api/v1/health`. `GET /api/v1/ready` returns 503 while PostgreSQL is unreachable. Run migrations only against the Compose database with `alembic upgrade head`.
 
+After migrations, create the administrator only through the interactive command below. There is no HTTP registration or bootstrap endpoint:
+
+```bash
+docker compose -f deployment/docker-compose.yml exec backend python -m app.cli.bootstrap_admin
+```
+
 ## Frontend
 
 From `frontend`, install packages and run `npm run dev`. Vite serves on port 5173 and proxies `/api` to a locally running backend on port 8000.
