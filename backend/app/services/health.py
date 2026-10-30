@@ -1,6 +1,7 @@
-from app.database.session import engine
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+
+from app.database.session import engine
 
 
 def database_is_available() -> bool:
