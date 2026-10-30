@@ -4,7 +4,7 @@ KiboLens is a self-hosted, evidence-first infrastructure observability and inves
 
 ## Current scope
 
-Phase 2 adds a single-administrator login, opaque server-side sessions, CSRF protection, and persistent conversation history. The investigation agent remains intentionally unavailable until a later phase; KiboLens never fabricates assistant findings.
+Phase 3 adds an optional low-resource Prometheus monitoring profile, authenticated host/container telemetry APIs, and unknown-aware Recharts dashboards. The investigation agent remains intentionally unavailable until a later phase; KiboLens never fabricates assistant findings.
 
 ## Quick start
 
@@ -32,3 +32,5 @@ flowchart LR
 ```
 
 See `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, and `DEVELOPMENT_STATUS.md` for phase details and deployment constraints.
+
+Monitoring setup, retention, thresholds, exporter permissions, and alert routing are documented in `docs/MONITORING.md`.
