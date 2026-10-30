@@ -1,0 +1,1 @@
+export function ComingSoonPage({ title }: { title: string }) { return <section className="grid min-h-80 place-items-center rounded-xl border border-dashed border-zinc-800 text-center"><div><h1 className="text-xl font-semibold">{title}</h1><p className="mt-2 text-sm text-zinc-500">This module will be implemented in a later phase.</p></div></section>; }
