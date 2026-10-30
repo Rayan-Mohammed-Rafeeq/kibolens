@@ -1,0 +1,19 @@
+import { useQuery } from "@tanstack/react-query";
+import { Activity, Server } from "lucide-react";
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { monitoringService } from "../services/monitoring";
+
+export function InfrastructurePage() {
+  const cpu = useQuery({ queryKey: ["metric-history", "cpu"], queryFn: () => monitoringService.history("cpu_utilization"), refetchInterval: 60_000 });
+  const memory = useQuery({ queryKey: ["metric-history", "memory"], queryFn: () => monitoringService.history("memory_utilization"), refetchInterval: 60_000 });
+  const containers = useQuery({ queryKey: ["containers"], queryFn: monitoringService.containers, refetchInterval: 30_000 });
+  return <section className="mx-auto max-w-6xl"><p className="text-sm font-medium text-cyan-300">Infrastructure</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Telemetry and containers</h1><p className="mt-2 text-zinc-400">Historical charts and inventory are sourced from Prometheus. Unavailable data is not estimated.</p><div className="mt-8 grid gap-4 lg:grid-cols-2"><HistoryChart title="CPU utilization" history={cpu.data} loading={cpu.isLoading} /><HistoryChart title="Memory utilization" history={memory.data} loading={memory.isLoading} /></div><section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40"><header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Container inventory</h2></header>{containers.isLoading ? <p className="p-5 text-sm text-zinc-500">Loading container telemetry…</p> : containers.data?.length ? <div className="divide-y divide-zinc-800">{containers.data.map((container) => <div className="flex items-center justify-between gap-4 p-5" key={container.id ?? container.name}><div><p className="font-medium">{container.name}</p><p className="mt-1 text-sm text-zinc-500">{container.availability === "available" ? `CPU ${display(container.cpu_percent, "%")} · memory ${displayBytes(container.memory_bytes)} · RX ${displayBytes(container.network_receive_bytes_per_second)}/s` : "Telemetry unavailable or stale"}</p></div><span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-3 py-1 text-xs text-amber-200">{container.status}</span></div>)}</div> : <p className="p-5 text-sm text-zinc-500">No current container inventory is available. A missing container is not treated as healthy.</p>}</section></section>;
+}
+
+function display(value: number | null, suffix = ""): string { return value === null ? "—" : `${value.toFixed(1)}${suffix}`; }
+function displayBytes(value: number | null): string { return value === null ? "—" : value > 1_048_576 ? `${(value / 1_048_576).toFixed(1)} MiB` : `${value.toFixed(0)} B`; }
+
+function HistoryChart({ title, history, loading }: { title: string; history?: { points: Array<{ timestamp: string; value: number }>; availability: string }; loading: boolean }) {
+  const data = history?.points.map((point) => ({ ...point, label: new Date(point.timestamp).toLocaleTimeString() })) ?? [];
+  return <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5"><div className="flex items-center gap-2"><Activity size={17} className="text-cyan-300" /><h2 className="font-medium">{title}</h2></div>{loading ? <p className="grid h-56 place-items-center text-sm text-zinc-500">Loading historical telemetry…</p> : history?.availability === "available" && data.length ? <div className="mt-5 h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><XAxis dataKey="label" hide /><YAxis width={32} /><Tooltip /><Line dataKey="value" stroke="#22d3ee" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></div> : <p className="grid h-56 place-items-center text-center text-sm text-zinc-500">Historical telemetry is unavailable. No chart data is fabricated.</p>}</article>;
+}
