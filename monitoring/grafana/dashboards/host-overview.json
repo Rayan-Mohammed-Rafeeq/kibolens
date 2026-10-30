@@ -1,0 +1,11 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {"type": "timeseries", "title": "CPU utilization", "targets": [{"expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)"}]},
+    {"type": "timeseries", "title": "Container memory", "targets": [{"expr": "sum by (name) (container_memory_working_set_bytes{image!=\"\"})"}]}
+  ],
+  "schemaVersion": 41,
+  "title": "KiboLens Host and Containers",
+  "version": 1
+}

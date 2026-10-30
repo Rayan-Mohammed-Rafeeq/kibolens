@@ -1,0 +1,28 @@
+groups:
+  - name: kibolens-infrastructure
+    rules:
+      - alert: HighCpuUtilization
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Sustained high CPU utilization" }
+      - alert: LowAvailableMemory
+        expr: 100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 90
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Low available memory" }
+      - alert: HighDiskUtilization
+        expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) > 90
+        for: 15m
+        labels: { severity: warning }
+        annotations: { summary: "High disk utilization" }
+      - alert: MonitoringTargetUnavailable
+        expr: up == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Monitoring target unavailable" }
+      - alert: ContainerMemoryPressure
+        expr: container_memory_working_set_bytes{image!=""} > 1610612736
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Container memory pressure" }
