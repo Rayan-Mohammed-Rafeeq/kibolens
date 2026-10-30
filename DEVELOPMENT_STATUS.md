@@ -2,7 +2,7 @@
 
 ## Current phase
 
-**Phase 1 — Foundation** is implemented and locally validated. Docker-based integration validation remains pending because Docker is not installed on the development machine.
+**Phase 2 — Authentication and Core Application** is implemented and locally validated. Docker-based PostgreSQL integration validation remains pending because Docker is not installed on the development machine.
 
 ## Completed
 
@@ -13,17 +13,21 @@
 - PostgreSQL + pgvector Docker Compose topology with non-public database networking.
 - Basic Caddy proxy and loopback-only frontend publication.
 - Backend health tests.
+- Single-administrator Argon2 bootstrap command with no public registration endpoint.
+- Opaque HttpOnly session cookies, server-side session revocation/expiry, login throttling, and CSRF checks.
+- Protected authentication and owner-scoped conversation/message APIs.
+- Persistent React login flow, route protection, session restoration, logout, and chat history UI.
 
 ## Pending
 
 - Docker installation and Compose integration validation.
-- Phase 2 authentication, administrator bootstrap, protected routes, conversations, and persistent messages.
 - All monitoring, incidents, RAG, agent, notifications, and production-hardening phases.
 
 ## Known limitations
 
 - The overview intentionally shows only API reachability; it does not present invented infrastructure metrics.
 - Database readiness returns HTTP 503 until PostgreSQL is reachable.
+- Chat persists user questions but does not generate assistant responses until the investigation agent is implemented.
 - No host configuration, mounts, firewall rules, disks, Docker services, or Cockpit settings were modified.
 
 ## Tests executed
@@ -34,6 +38,10 @@
 - `backend/.venv/bin/alembic -c backend/alembic.ini upgrade head --sql` — passed.
 - `npm --prefix frontend run build` — passed.
 - `git diff --check` — passed.
+- `backend/.venv/bin/pytest` — 6 passed (authentication, CSRF, expiry, ownership, persistence, and health).
+- `npm --prefix frontend test` — 3 passed (login submission and route protection).
+- `npm --prefix frontend run build` — passed.
+- `backend/.venv/bin/alembic -c backend/alembic.ini upgrade head --sql` — passed.
 - Docker Compose cannot be executed on this machine because the `docker` command is unavailable.
 
 ## Deployment status
