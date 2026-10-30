@@ -1,6 +1,9 @@
 :80 {
     encode zstd gzip
 
+    @internalAlert path /api/v1/monitoring/alerts
+    respond @internalAlert 404
+
     handle /api/* {
         reverse_proxy backend:8000
     }
