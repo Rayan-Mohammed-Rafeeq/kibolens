@@ -1,5 +1,8 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as tz
+
+UTC = tz.utc
 
 from app.core.config import Settings
 from app.monitoring.prometheus import (

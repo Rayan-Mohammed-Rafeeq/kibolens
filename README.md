@@ -4,7 +4,7 @@ KiboLens is a self-hosted, evidence-first infrastructure observability and inves
 
 ## Current scope
 
-Phase 3 adds an optional low-resource Prometheus monitoring profile, authenticated host/container telemetry APIs, and unknown-aware Recharts dashboards. The investigation agent remains intentionally unavailable until a later phase; KiboLens never fabricates assistant findings.
+Phase 4 adds a complete incident management subsystem. Alertmanager webhooks automatically create and update incidents with full event timelines and evidence capture. The backend API provides filtering, pagination, and state management with a documented transition policy. Frontend UI components are pending. The AI investigation agent remains intentionally unavailable until Phase 5; KiboLens incident descriptions come directly from alert annotations.
 
 ## Quick start
 

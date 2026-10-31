@@ -1,8 +1,11 @@
 import secrets
-from datetime import UTC, datetime
+from datetime import datetime
+from datetime import timezone as tz
 from typing import Literal
 
-from app.api.dependencies import CurrentUser
+UTC = tz.utc
+
+from app.api.dependencies import CurrentUser, get_db
 from app.core.config import get_settings
 from app.monitoring.alerts import AlertDeduplicator
 from app.monitoring.prometheus import PrometheusClient
@@ -15,7 +18,8 @@ from app.schemas.monitoring import (
     MetricHistory,
     MonitoringStatus,
 )
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 alerts_router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -70,6 +74,7 @@ async def alertmanager_webhook(
     request: Request,
     payload: AlertmanagerWebhook,
     authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> AlertWebhookResponse:
     content_length = request.headers.get("content-length")
     try:
@@ -91,5 +96,26 @@ async def alertmanager_webhook(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid alert webhook token."
         )
-    accepted = sum(deduplicator.accept(alert.fingerprint) for alert in payload.alerts)
-    return AlertWebhookResponse(accepted=accepted, deduplicated=len(payload.alerts) - accepted)
+    
+    # Process alerts and create/update incidents
+    from app.services.incidents import IncidentService
+    
+    settings = get_settings()
+    monitoring = monitoring_service()
+    incident_service = IncidentService(db, monitoring)
+    
+    processed = 0
+    for alert in payload.alerts:
+        # Use deduplicator for idempotency within this request
+        if deduplicator.accept(alert.fingerprint):
+            try:
+                incident_service.process_alert(alert)
+                processed += 1
+            except Exception as e:
+                # Log error but continue processing other alerts
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to process alert {alert.fingerprint}: {e}")
+    
+    db.commit()
+    return AlertWebhookResponse(accepted=processed, deduplicated=len(payload.alerts) - processed)

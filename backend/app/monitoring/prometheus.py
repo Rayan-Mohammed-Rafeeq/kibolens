@@ -1,4 +1,7 @@
-from datetime import UTC, datetime
+from datetime import datetime
+from datetime import timezone as tz
+
+UTC = tz.utc
 from typing import Any
 
 import httpx

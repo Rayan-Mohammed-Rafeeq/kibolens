@@ -1,4 +1,7 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as tz
+
+UTC = tz.utc
 
 import pytest
 from app.api.routes import infrastructure

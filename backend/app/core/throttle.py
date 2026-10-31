@@ -1,5 +1,8 @@
 from collections import defaultdict, deque
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as tz
+
+UTC = tz.utc
 
 
 class LoginThrottle:

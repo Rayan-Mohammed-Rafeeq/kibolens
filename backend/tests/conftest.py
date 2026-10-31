@@ -1,11 +1,24 @@
 from collections.abc import Generator
+import os
+
+# Set test database URL before importing any app modules
+os.environ["KIBOLENS_DATABASE_URL"] = "sqlite://"
 
 import pytest
 from app.api.dependencies import get_db
 from app.api.routes.auth import throttle
 from app.database.base import Base
 from app.main import app
-from app.models import Conversation, Message, User, UserSession  # noqa: F401
+from app.models import (  # noqa: F401
+    Conversation,
+    EvidenceRecord,
+    Incident,
+    IncidentEvent,
+    IncidentSequence,
+    Message,
+    User,
+    UserSession,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker

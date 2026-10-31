@@ -1,4 +1,7 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as tz
+
+UTC = tz.utc
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
