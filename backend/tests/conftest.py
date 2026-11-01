@@ -1,10 +1,12 @@
 from collections.abc import Generator
 import os
-
-# Set test database URL before importing any app modules
-os.environ["KIBOLENS_DATABASE_URL"] = "sqlite://"
-
 import pytest
+
+# IMPORTANT: Set test environment BEFORE any imports that use get_settings()
+os.environ["KIBOLENS_ENVIRONMENT"] = "test"
+os.environ["KIBOLENS_DATABASE_URL"] = "sqlite://"
+os.environ["KIBOLENS_ALLOWED_EMAILS"] = "admin@example.com,other@example.com,rayanmohammedrafeeq@gmail.com,rakinmohammedrafeeq@gmail.com"
+
 from app.api.dependencies import get_db
 from app.api.routes.auth import throttle
 from app.database.base import Base

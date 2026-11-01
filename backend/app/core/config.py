@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2000, ge=100, le=32000)
     llm_request_timeout_seconds: float = Field(default=120, gt=0, le=600)
 
+    # Email/OTP Configuration
+    resend_api_key: SecretStr | None = Field(default=None, alias="RESEND_API_KEY")
+    email_from: str = Field(default="noreply@example.com")
+    email_reply_to: str | None = None
+    allowed_emails: str = Field(
+        default=""  # Must be configured via KIBOLENS_ALLOWED_EMAILS
+    )
+    otp_hash_secret: SecretStr = Field(default=SecretStr("change-me-otp-secret"))
+    otp_ttl_seconds: int = Field(default=300, ge=60, le=600)
+    otp_resend_cooldown_seconds: int = Field(default=60, ge=30, le=300)
+    otp_max_attempts: int = Field(default=5, ge=3, le=10)
+
     @model_validator(mode="after")
     def validate_production_session_settings(self) -> Settings:
         if self.environment == "production":
@@ -48,6 +60,10 @@ class Settings(BaseSettings):
                 raise ValueError("KIBOLENS_SESSION_COOKIE_SECURE must be true in production.")
             if self.alert_webhook_token is None or not self.alert_webhook_token.get_secret_value():
                 raise ValueError("KIBOLENS_ALERT_WEBHOOK_TOKEN is required in production.")
+            if self.resend_api_key is None or not self.resend_api_key.get_secret_value():
+                raise ValueError("RESEND_API_KEY is required in production.")
+            if self.otp_hash_secret.get_secret_value() == "change-me-otp-secret":
+                raise ValueError("KIBOLENS_OTP_HASH_SECRET must be set in production.")
         if self.cpu_warning_percent >= self.cpu_critical_percent:
             raise ValueError("CPU warning threshold must be less than its critical threshold.")
         if self.memory_warning_percent >= self.memory_critical_percent:
@@ -55,6 +71,11 @@ class Settings(BaseSettings):
         if self.disk_warning_percent >= self.disk_critical_percent:
             raise ValueError("Disk warning threshold must be less than its critical threshold.")
         return self
+    
+    def get_allowed_emails(self) -> set[str]:
+        """Parse and normalize allowed email addresses."""
+        emails = {email.strip().lower() for email in self.allowed_emails.split(",")}
+        return {email for email in emails if email}  # Remove empty strings
 
 
 @lru_cache

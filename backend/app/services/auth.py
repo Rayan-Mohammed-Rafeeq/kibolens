@@ -26,10 +26,92 @@ class InvalidCredentialsError(Exception):
     pass
 
 
-def bootstrap_administrator(database: Session, username: str, password: str) -> User:
+class EmailNotAllowedError(Exception):
+    """Email address not in administrator allowlist."""
+    pass
+
+
+class DuplicateEmailError(Exception):
+    """Email address already registered."""
+    pass
+
+
+class DuplicateUsernameError(Exception):
+    """Username already taken."""
+    pass
+
+
+def normalize_email(email: str) -> str:
+    """Normalize email address for comparison (lowercase)."""
+    return email.strip().lower()
+
+
+def bootstrap_administrator(database: Session, username: str, email: str, password: str) -> User:
+    """
+    Bootstrap first administrator account.
+    
+    Deprecated: Use provision_administrator instead for multi-admin support.
+    Kept for backward compatibility.
+    """
     if database.scalar(select(User.id).where(User.role == "admin").limit(1)) is not None:
         raise BootstrapAlreadyCompletedError
-    user = User(username=username, password_hash=hash_password(password), role="admin")
+    
+    email_normalized = normalize_email(email)
+    user = User(
+        username=username,
+        email=email,
+        email_normalized=email_normalized,
+        password_hash=hash_password(password),
+        role="admin"
+    )
+    database.add(user)
+    database.commit()
+    database.refresh(user)
+    return user
+
+
+def provision_administrator(
+    database: Session,
+    username: str,
+    email: str,
+    password: str,
+    settings: Settings
+) -> User:
+    """
+    Provision an administrator account.
+    
+    Validates:
+    - Email is in allowed list
+    - Email not already registered
+    - Username not already taken
+    """
+    email_normalized = normalize_email(email)
+    allowed_emails = settings.get_allowed_emails()
+    
+    if email_normalized not in allowed_emails:
+        raise EmailNotAllowedError(f"Email {email} is not in the administrator allowlist")
+    
+    # Check for duplicate email
+    existing_email = database.scalar(
+        select(User.id).where(User.email_normalized == email_normalized)
+    )
+    if existing_email:
+        raise DuplicateEmailError(f"Email {email} is already registered")
+    
+    # Check for duplicate username
+    existing_username = database.scalar(
+        select(User.id).where(User.username == username)
+    )
+    if existing_username:
+        raise DuplicateUsernameError(f"Username {username} is already taken")
+    
+    user = User(
+        username=username,
+        email=email,
+        email_normalized=email_normalized,
+        password_hash=hash_password(password),
+        role="admin"
+    )
     database.add(user)
     database.commit()
     database.refresh(user)
@@ -37,7 +119,25 @@ def bootstrap_administrator(database: Session, username: str, password: str) -> 
 
 
 def authenticate(database: Session, username: str, password: str) -> User:
+    """
+    Authenticate user by username and password.
+    
+    Note: This only verifies credentials. Session creation requires OTP verification.
+    """
     user = database.scalar(select(User).where(User.username == username))
+    if user is None or not password_matches(user.password_hash, password):
+        raise InvalidCredentialsError
+    return user
+
+
+def authenticate_by_email(database: Session, email: str, password: str) -> User:
+    """
+    Authenticate user by email and password.
+    
+    Note: This only verifies credentials. Session creation requires OTP verification.
+    """
+    email_normalized = normalize_email(email)
+    user = database.scalar(select(User).where(User.email_normalized == email_normalized))
     if user is None or not password_matches(user.password_hash, password):
         raise InvalidCredentialsError
     return user

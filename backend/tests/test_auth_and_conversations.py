@@ -5,22 +5,34 @@ UTC = tz.utc
 
 from app.models.session import UserSession
 from app.models.user import User
-from app.services.auth import BootstrapAlreadyCompletedError, bootstrap_administrator, hash_password
+from app.services.auth import (
+    BootstrapAlreadyCompletedError, 
+    bootstrap_administrator, 
+    create_session,
+    hash_password
+)
+from app.core.config import get_settings
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 
 def bootstrap(database: Session, username: str = "admin") -> User:
-    return bootstrap_administrator(database, username, "correct-horse-battery-staple")
-
-
-def login(client: TestClient, username: str = "admin") -> str:
-    response = client.post(
-        "/api/v1/auth/login",
-        json={"username": username, "password": "correct-horse-battery-staple"},
+    return bootstrap_administrator(
+        database, 
+        username, 
+        f"{username}@example.com",  # Use example.com for testing
+        "correct-horse-battery-staple"
     )
-    assert response.status_code == 200
-    return response.json()["csrf_token"]
+
+
+def create_test_session(database: Session, user: User) -> tuple[str, str]:
+    """Create authenticated session for testing without going through OTP flow.
+    
+    Returns (session_token, csrf_token) for authenticated requests.
+    TestClient requires cookies to be passed per-request via cookies parameter.
+    """
+    raw_token, csrf_token, _ = create_session(database, user, get_settings())
+    return raw_token, csrf_token
 
 
 def headers(csrf_token: str) -> dict[str, str]:
@@ -41,30 +53,48 @@ def test_bootstrap_only_allows_one_administrator(database: Session) -> None:
 
 
 def test_login_me_logout_and_csrf_protection(client: TestClient, database: Session) -> None:
-    bootstrap(database)
+    user = bootstrap(database)
     assert client.get("/api/v1/auth/me").status_code == 401
 
+    # Verify password-only login does not create session
     invalid_login = client.post(
-        "/api/v1/auth/login", json={"username": "admin", "password": "wrong"}
+        "/api/v1/auth/login", json={"email": "admin@example.com", "password": "wrong"}
     )
     assert invalid_login.status_code == 401
-
-    csrf_token = login(client)
-    assert client.get("/api/v1/auth/me").json()["username"] == "admin"
-    assert client.post("/api/v1/conversations", json={"title": "Needs CSRF"}).status_code == 403
-
-    logout = client.post("/api/v1/auth/logout", headers=headers(csrf_token))
-    assert logout.status_code == 204
+    
+    # Valid password should NOT create session (returns LoginStage1Response)
+    valid_password = client.post(
+        "/api/v1/auth/login", 
+        json={"email": "admin@example.com", "password": "correct-horse-battery-staple"}
+    )
+    assert valid_password.status_code == 200
+    response_data = valid_password.json()
+    assert response_data["requires_otp"] == True
+    assert "masked_email" in response_data
+    # Verify no session was created
     assert client.get("/api/v1/auth/me").status_code == 401
+
+    # Create session via test fixture (simulates successful OTP verification)
+    session_token, csrf_token = create_test_session(database, user)
+    cookies = {"kibolens_session": session_token}
+    
+    assert client.get("/api/v1/auth/me", cookies=cookies).json()["username"] == "admin"
+    assert client.post("/api/v1/conversations", json={"title": "Needs CSRF"}, cookies=cookies).status_code == 403
+
+    logout = client.post("/api/v1/auth/logout", headers=headers(csrf_token), cookies=cookies)
+    assert logout.status_code == 204
+    assert client.get("/api/v1/auth/me", cookies=cookies).status_code == 401
 
 
 def test_expired_session_is_rejected(client: TestClient, database: Session) -> None:
-    bootstrap(database)
-    login(client)
+    user = bootstrap(database)
+    session_token, csrf_token = create_test_session(database, user)
+    cookies = {"kibolens_session": session_token}
+    
     session = database.query(UserSession).one()
     session.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     database.commit()
-    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.get("/api/v1/auth/me", cookies=cookies).status_code == 401
 
 
 def test_conversations_are_persisted_paginated_and_private(
@@ -72,14 +102,21 @@ def test_conversations_are_persisted_paginated_and_private(
 ) -> None:
     admin = bootstrap(database)
     other = User(
-        username="other", password_hash=hash_password("correct-horse-battery-staple"), role="user"
+        username="other", 
+        email="other@example.com",
+        email_normalized="other@example.com",
+        password_hash=hash_password("correct-horse-battery-staple"), 
+        role="user"
     )
     database.add(other)
     database.commit()
-    csrf_token = login(client)
+    database.refresh(other)
+    
+    session_token, csrf_token = create_test_session(database, admin)
+    cookies = {"kibolens_session": session_token}
 
     created = client.post(
-        "/api/v1/conversations", json={"title": "Investigate Kibo"}, headers=headers(csrf_token)
+        "/api/v1/conversations", json={"title": "Investigate Kibo"}, headers=headers(csrf_token), cookies=cookies
     )
     assert created.status_code == 201
     conversation_id = created.json()["id"]
@@ -87,43 +124,43 @@ def test_conversations_are_persisted_paginated_and_private(
         f"/api/v1/conversations/{conversation_id}/messages",
         json={"content": "Is everything fine?"},
         headers=headers(csrf_token),
+        cookies=cookies,
     )
     assert message.status_code == 201
     assert message.json()["role"] == "user"
     assert (
-        client.get(f"/api/v1/conversations/{conversation_id}/messages").json()["items"][0][
+        client.get(f"/api/v1/conversations/{conversation_id}/messages", cookies=cookies).json()["items"][0][
             "content"
         ]
         == "Is everything fine?"
     )
 
     second = client.post(
-        "/api/v1/conversations", json={"title": "Second"}, headers=headers(csrf_token)
+        "/api/v1/conversations", json={"title": "Second"}, headers=headers(csrf_token), cookies=cookies
     )
     assert second.status_code == 201
-    page = client.get("/api/v1/conversations?limit=1").json()
+    page = client.get("/api/v1/conversations?limit=1", cookies=cookies).json()
     assert len(page["items"]) == 1
     assert page["next_offset"] == 1
 
-    other_session = TestClient(client.app)
-    other_login = other_session.post(
-        "/api/v1/auth/login", json={"username": "other", "password": "correct-horse-battery-staple"}
-    )
-    assert other_login.status_code == 200
-    assert other_session.get(f"/api/v1/conversations/{conversation_id}").status_code == 404
+    other_session_token, other_csrf = create_test_session(database, other)
+    other_cookies = {"kibolens_session": other_session_token}
+    
+    assert client.get(f"/api/v1/conversations/{conversation_id}", cookies=other_cookies).status_code == 404
     assert (
-        other_session.delete(
+        client.delete(
             f"/api/v1/conversations/{conversation_id}",
-            headers=headers(other_login.json()["csrf_token"]),
+            headers=headers(other_csrf),
+            cookies=other_cookies,
         ).status_code
         == 404
     )
 
     assert (
         client.delete(
-            f"/api/v1/conversations/{conversation_id}", headers=headers(csrf_token)
+            f"/api/v1/conversations/{conversation_id}", headers=headers(csrf_token), cookies=cookies
         ).status_code
         == 204
     )
-    assert client.get(f"/api/v1/conversations/{conversation_id}").status_code == 404
+    assert client.get(f"/api/v1/conversations/{conversation_id}", cookies=cookies).status_code == 404
     assert admin.username == "admin"
