@@ -1,6 +1,7 @@
 from app.api.dependencies import CsrfSession, CurrentUser, DatabaseSession, require_session
 from app.core.config import get_settings
 from app.core.throttle import LoginThrottle
+from app.models.user import User
 from app.schemas.auth import (
     CsrfTokenResponse,
     CurrentUserResponse,
@@ -32,6 +33,7 @@ from app.services.otp import (
     verify_otp,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import select
 import logging
 
 logger = logging.getLogger(__name__)
@@ -199,71 +201,71 @@ def verify_otp_endpoint(
             detail="Too many verification attempts."
         )
     
-    # Get user by email
-    try:
-        user = authenticate_by_email(database, payload.email, "")
-    except InvalidCredentialsError:
-        # User lookup failed - don't reveal if email exists
-        pass
-    else:
-        if not user.email:
-            # Legacy user without email - cannot use OTP auth
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid verification code."
-            )
-        
-        # Verify OTP
-        settings = get_settings()
-        try:
-            verify_otp(database, str(user.id), payload.otp, settings)
-            
-            # OTP verified - clear throttle and create session
-            throttle.clear(throttle_key)
-            
-            raw_token, csrf_token, _ = create_session(database, user, settings)
-            
-            response.set_cookie(
-                key=settings.session_cookie_name,
-                value=raw_token,
-                max_age=settings.session_ttl_hours * 3600,
-                httponly=True,
-                secure=settings.session_cookie_secure,
-                samesite="lax",
-                path="/",
-            )
-            
-            logger.info(f"User {user.id} authenticated successfully via OTP")
-            
-            return LoginResponse(user=user_response(user), csrf_token=csrf_token)
-            
-        except OTPExpiredError:
-            throttle.record_failure(throttle_key)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Verification code has expired. Please request a new one."
-            ) from None
-        except OTPMaxAttemptsError:
-            throttle.record_failure(throttle_key)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Maximum verification attempts exceeded. Please request a new code."
-            ) from None
-        except OTPAlreadyConsumedError:
-            throttle.record_failure(throttle_key)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="This verification code has already been used. Please request a new one."
-            ) from None
-        except (OTPInvalidError, OTPError):
-            throttle.record_failure(throttle_key)
-            pass  # Fall through to generic error
-    
-    # Generic error for all failures (prevents account enumeration)
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid verification code."
+    # Get user by email (no password verification needed for OTP step)
+    email_normalized = payload.email.lower().strip()
+    user = database.scalar(
+        select(User).where(User.email_normalized == email_normalized)
     )
+    
+    if not user or not user.email:
+        # Generic error for security (don't reveal if email exists)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid verification code."
+        )
+    
+    # Verify OTP
+    settings = get_settings()
+    try:
+        verify_otp(database, str(user.id), payload.otp, settings)
+        
+        # OTP verified - clear throttle and create session
+        throttle.clear(throttle_key)
+        
+        raw_token, csrf_token, _ = create_session(database, user, settings)
+        
+        response.set_cookie(
+            key=settings.session_cookie_name,
+            value=raw_token,
+            max_age=settings.session_ttl_hours * 3600,
+            httponly=True,
+            secure=settings.session_cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        
+        logger.info(f"User {user.id} authenticated successfully via OTP")
+        
+        return LoginResponse(user=user_response(user), csrf_token=csrf_token)
+        
+    except OTPExpiredError:
+        throttle.record_failure(throttle_key)
+        logger.warning(f"Expired OTP attempt for user {user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Verification code has expired. Please request a new one."
+        ) from None
+    except OTPMaxAttemptsError:
+        throttle.record_failure(throttle_key)
+        logger.warning(f"Max OTP attempts exceeded for user {user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Maximum verification attempts exceeded. Please request a new code."
+        ) from None
+    except OTPAlreadyConsumedError:
+        throttle.record_failure(throttle_key)
+        logger.warning(f"Already-consumed OTP attempt for user {user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This verification code has already been used. Please request a new one."
+        ) from None
+    except (OTPInvalidError, OTPError) as e:
+        throttle.record_failure(throttle_key)
+        logger.warning(f"Invalid OTP attempt for user {user.id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid verification code."
+        ) from None
 
 
 @router.post("/resend-otp", response_model=OTPResendResponse)
