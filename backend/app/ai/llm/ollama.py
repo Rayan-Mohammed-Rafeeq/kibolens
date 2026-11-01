@@ -8,8 +8,7 @@ import time
 from typing import Any, TypeVar
 
 import httpx
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
+from ollama import AsyncClient
 from pydantic import BaseModel, ValidationError
 
 from app.ai.llm.base import BaseLLMProvider, LLMResponse
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(BaseLLMProvider):
-    """Ollama LLM provider using langchain-ollama.
+    """Ollama LLM provider using ollama AsyncClient.
     
     Supports both text generation and structured outputs via JSON mode + Pydantic parsing.
     """
@@ -39,14 +38,8 @@ class OllamaProvider(BaseLLMProvider):
         self.default_max_tokens = settings.llm_max_tokens
         self.timeout = settings.ollama_timeout_seconds
 
-        # Initialize ChatOllama client
-        self._client = ChatOllama(
-            base_url=self.base_url,
-            model=self.model,
-            temperature=self.default_temperature,
-            num_predict=self.default_max_tokens,
-            timeout=self.timeout,
-        )
+        # Initialize Ollama AsyncClient
+        self._client = AsyncClient(host=self.base_url, timeout=self.timeout)
 
     async def generate(
         self,
@@ -69,39 +62,44 @@ class OllamaProvider(BaseLLMProvider):
         try:
             start_time = time.time()
 
-            # Build message list
-            messages: list[SystemMessage | HumanMessage] = []
+            # Build messages list
+            messages = []
             if system_prompt:
-                messages.append(SystemMessage(content=system_prompt))
-            messages.append(HumanMessage(content=prompt))
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
 
-            # Configure generation parameters
-            client = self._client
-            if temperature is not None:
-                client = client.bind(temperature=temperature)
-            if max_tokens is not None:
-                client = client.bind(num_predict=max_tokens)
+            # Configure generation options - must be passed through options dict
+            options = {
+                "temperature": temperature if temperature is not None else self.default_temperature,
+                "num_predict": max_tokens if max_tokens is not None else self.default_max_tokens,
+                "num_thread": 2,  # Conservative threading
+                "num_ctx": 2048,  # Context window
+            }
 
-            # Generate response
-            response = await client.ainvoke(messages)
+            # Generate response using Ollama AsyncClient
+            response = await self._client.chat(
+                model=self.model,
+                messages=messages,
+                options=options,
+            )
+
             latency = time.time() - start_time
 
-            content = response.content if isinstance(response.content, str) else str(response.content)
+            # Extract content from response
+            content = response.get("message", {}).get("content", "")
 
             metadata = {
                 "model": self.model,
                 "provider": "ollama",
                 "latency_seconds": round(latency, 3),
-                "temperature": temperature or self.default_temperature,
+                "temperature": options["temperature"],
             }
 
             # Extract token usage if available
-            if hasattr(response, "response_metadata"):
-                response_meta = response.response_metadata
-                if "eval_count" in response_meta:
-                    metadata["output_tokens"] = response_meta["eval_count"]
-                if "prompt_eval_count" in response_meta:
-                    metadata["input_tokens"] = response_meta["prompt_eval_count"]
+            if "prompt_eval_count" in response:
+                metadata["input_tokens"] = response["prompt_eval_count"]
+            if "eval_count" in response:
+                metadata["output_tokens"] = response["eval_count"]
 
             return LLMResponse[None](
                 content=content,
@@ -157,23 +155,31 @@ class OllamaProvider(BaseLLMProvider):
 Respond ONLY with the JSON object. Do not include explanations, markdown formatting, or code blocks."""
 
             # Build messages
-            messages: list[SystemMessage | HumanMessage] = [
-                SystemMessage(content=structured_system_prompt),
-                HumanMessage(content=prompt),
+            messages = [
+                {"role": "system", "content": structured_system_prompt},
+                {"role": "user", "content": prompt},
             ]
 
-            # Configure generation with JSON format
-            client = self._client.bind(format="json")
-            if temperature is not None:
-                client = client.bind(temperature=temperature)
-            if max_tokens is not None:
-                client = client.bind(num_predict=max_tokens)
+            # Configure generation options with JSON format
+            options = {
+                "temperature": temperature if temperature is not None else self.default_temperature,
+                "num_predict": max_tokens if max_tokens is not None else self.default_max_tokens,
+                "num_thread": 2,  # Conservative threading
+                "num_ctx": 2048,  # Context window
+            }
 
-            # Generate response
-            response = await client.ainvoke(messages)
+            # Generate response with JSON format
+            response = await self._client.chat(
+                model=self.model,
+                messages=messages,
+                format="json",
+                options=options,
+            )
+
             latency = time.time() - start_time
 
-            content = response.content if isinstance(response.content, str) else str(response.content)
+            # Extract content from response
+            content = response.get("message", {}).get("content", "")
 
             # Parse JSON and validate against Pydantic model
             try:
@@ -189,7 +195,7 @@ Respond ONLY with the JSON object. Do not include explanations, markdown formatt
                 "model": self.model,
                 "provider": "ollama",
                 "latency_seconds": round(latency, 3),
-                "temperature": temperature or self.default_temperature,
+                "temperature": options["temperature"],
                 "format": "json",
             }
 
@@ -197,12 +203,10 @@ Respond ONLY with the JSON object. Do not include explanations, markdown formatt
                 metadata["parse_error"] = parse_error
 
             # Extract token usage
-            if hasattr(response, "response_metadata"):
-                response_meta = response.response_metadata
-                if "eval_count" in response_meta:
-                    metadata["output_tokens"] = response_meta["eval_count"]
-                if "prompt_eval_count" in response_meta:
-                    metadata["input_tokens"] = response_meta["prompt_eval_count"]
+            if "prompt_eval_count" in response:
+                metadata["input_tokens"] = response["prompt_eval_count"]
+            if "eval_count" in response:
+                metadata["output_tokens"] = response["eval_count"]
 
             return LLMResponse[T](
                 content=content,
