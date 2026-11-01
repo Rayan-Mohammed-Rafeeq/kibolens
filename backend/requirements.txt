@@ -6,3 +6,18 @@ psycopg[binary]==3.3.2
 pydantic-settings==2.12.0
 sqlalchemy==2.0.46
 uvicorn[standard]==0.40.0
+
+# AI/LLM dependencies
+langchain-core==0.3.28
+langchain-ollama==0.2.1
+langgraph==0.2.60
+langchain-text-splitters==0.3.4
+
+# Document processing
+pypdf==5.1.0
+python-multipart==0.0.20
+
+# Vector operations
+pgvector==0.5.1
+numpy==2.2.2
+scikit-learn==1.6.1

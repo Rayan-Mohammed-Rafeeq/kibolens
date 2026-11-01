@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     disk_critical_percent: float = Field(default=90, ge=1, le=100)
     alert_webhook_token: SecretStr | None = None
 
+    # AI/LLM Configuration
+    llm_provider: str = Field(default="ollama")
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2:3b"
+    ollama_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    llm_temperature: float = Field(default=0.1, ge=0, le=1)
+    llm_max_tokens: int = Field(default=2000, ge=100, le=32000)
+    llm_request_timeout_seconds: float = Field(default=120, gt=0, le=600)
+
     @model_validator(mode="after")
     def validate_production_session_settings(self) -> Settings:
         if self.environment == "production":

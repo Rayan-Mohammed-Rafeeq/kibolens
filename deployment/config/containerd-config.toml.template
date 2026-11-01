@@ -1,0 +1,25 @@
+# KiboLens containerd Configuration
+#
+# This configuration relocates containerd's root directory to the SSD volume
+# mounted at /var/lib/docker to prevent exhausting root filesystem capacity.
+#
+# Generation instructions:
+#   1. Install containerd: apt-get install -y containerd.io
+#   2. Generate default config: containerd config default > /tmp/default-config.toml
+#   3. Copy this file to /etc/containerd/config.toml
+#   4. Modify ONLY the root setting (preserve other defaults)
+#
+# CRITICAL: Backup existing /etc/containerd/config.toml before overwriting!
+#
+# Modified settings:
+#   root = "/var/lib/docker/containerd-root"  # Was: /var/lib/containerd
+#   state = "/run/containerd"                  # Unchanged (tmpfs runtime state)
+#
+# All other settings should remain at containerd's installed defaults.
+# Do NOT copy this file directly - use it as a reference to modify
+# the generated default configuration from your containerd version.
+
+# Example modification (preserve all other settings from containerd config default):
+# [root]
+#   root = "/var/lib/docker/containerd-root"
+#   state = "/run/containerd"

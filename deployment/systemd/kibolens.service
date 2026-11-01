@@ -1,0 +1,48 @@
+[Unit]
+Description=KiboLens Incident Management System
+Documentation=file:///home/sysadmin/kibolens/docs/
+Requires=docker.service
+After=docker.service var-lib-docker.mount mnt-kiboto\x2dstorage.mount
+RequiresMountsFor=/var/lib/docker /mnt/kiboto-storage
+BindsTo=var-lib-docker.mount mnt-kiboto\x2dstorage.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Run as root: Docker socket access requires root or docker group membership.
+# Running as root via systemd is more secure than adding sysadmin to docker group
+# (which grants permanent root-equivalent privileges to the user account).
+WorkingDirectory=/home/sysadmin/kibolens
+
+# Verify both SSD and HDD mounts before starting
+ExecStartPre=/usr/local/bin/kibolens-mount-check.sh
+
+# Start core services only (monitoring profile managed separately)
+# Explicit project name ensures consistent container naming
+# Explicit env file ensures correct configuration is loaded
+ExecStart=/usr/bin/docker compose \
+    --project-directory /home/sysadmin/kibolens \
+    --env-file /home/sysadmin/kibolens/.env \
+    -f /home/sysadmin/kibolens/deployment/docker-compose.yml \
+    up -d
+
+# Graceful shutdown - stops only core services (postgres, backend, frontend)
+# Monitoring profile containers are not affected if running
+# Network and volumes are preserved
+ExecStop=/usr/bin/docker compose \
+    --project-directory /home/sysadmin/kibolens \
+    --env-file /home/sysadmin/kibolens/.env \
+    -f /home/sysadmin/kibolens/deployment/docker-compose.yml \
+    stop postgres backend frontend
+
+# Restart policy
+Restart=on-failure
+RestartSec=30s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kibolens
+
+[Install]
+WantedBy=multi-user.target
