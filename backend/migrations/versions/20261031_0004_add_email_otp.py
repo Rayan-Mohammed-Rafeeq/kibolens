@@ -1,7 +1,7 @@
 """add email and otp authentication
 
-Revision ID: 20261031_0003
-Revises: 20261030_0002
+Revision ID: 20261031_0004
+Revises: 20261031_0003
 Create Date: 2026-10-31 20:00:00.000000
 
 """
@@ -12,8 +12,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '20261031_0003'
-down_revision: Union[str, None] = '20261030_0002'
+revision: str = '20261031_0004'
+down_revision: Union[str, None] = '20261031_0003'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
