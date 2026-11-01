@@ -1,3 +1,5 @@
+name: kibolens
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -61,7 +63,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    networks: [kibolens]
+    networks:
+      - kibolens
+      - backend_egress
 
   frontend:
     build:
@@ -248,12 +252,15 @@ services:
 networks:
   kibolens:
     internal: true
+  backend_egress:
+    driver: bridge
   frontend_ingress:
     driver: bridge
 
 volumes:
   postgres_data:
-    driver: local
+    external: true
+    name: deployment_postgres_data
   prometheus_data:
     driver: local
 
