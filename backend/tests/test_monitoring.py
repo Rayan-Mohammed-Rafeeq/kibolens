@@ -117,3 +117,246 @@ def test_alert_webhook_requires_bearer_token_and_deduplicates(
         "accepted": 0,
         "deduplicated": 1,
     }
+
+
+@pytest.mark.anyio
+async def test_containers_deduplicated_by_id() -> None:
+    """Container inventory deduplicates by container ID when multiple name labels exist."""
+    
+    class FakeClientWithDuplicates:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                # Simulate same container with different name labels (Compose vs runtime)
+                return [
+                    {
+                        "metric": {
+                            "id": "abc123def456",
+                            "name": "kibolens-grafana-1",
+                            "image": "grafana/grafana:12.3.1"
+                        },
+                        "value": [timestamp, "1"]
+                    },
+                    {
+                        "metric": {
+                            "id": "abc123def456",
+                            "name": "/kibolens_grafana_1",
+                            "image": "grafana/grafana:12.3.1"
+                        },
+                        "value": [timestamp, "1"]
+                    }
+                ]
+            elif "container_cpu_usage" in query:
+                return [
+                    {"metric": {"id": "abc123def456"}, "value": [timestamp, "0.5"]}
+                ]
+            elif "container_memory" in query:
+                return [
+                    {"metric": {"id": "abc123def456"}, "value": [timestamp, "536870912"]}
+                ]
+            return []
+    
+    service = MonitoringService(FakeClientWithDuplicates(), Settings())
+    containers = await service.containers()
+    
+    # Should only have one container despite two time series
+    assert len(containers) == 1
+    assert containers[0].id == "abc123def456"
+    # Should prefer Compose-style name (with hyphens)
+    assert containers[0].name == "kibolens-grafana-1"
+    # Metrics should be preserved
+    assert containers[0].cpu_percent == 0.5
+    assert containers[0].memory_bytes == 536870912
+
+
+@pytest.mark.anyio
+async def test_container_names_normalized() -> None:
+    """Container names have leading slashes removed."""
+    
+    class FakeClientWithSlash:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                return [
+                    {
+                        "metric": {
+                            "id": "def456abc789",
+                            "name": "/backend",
+                            "image": "backend:latest"
+                        },
+                        "value": [timestamp, "1"]
+                    }
+                ]
+            return []
+    
+    service = MonitoringService(FakeClientWithSlash(), Settings())
+    containers = await service.containers()
+    
+    assert len(containers) == 1
+    assert containers[0].name == "backend"  # Leading slash removed
+    assert not containers[0].name.startswith("/")
+
+
+@pytest.mark.anyio
+async def test_different_containers_remain_separate() -> None:
+    """Different container IDs with similar names remain separate entries."""
+    
+    class FakeClientWithMultiple:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                return [
+                    {
+                        "metric": {
+                            "id": "container1",
+                            "name": "backend-1",
+                            "image": "backend:v1"
+                        },
+                        "value": [timestamp, "1"]
+                    },
+                    {
+                        "metric": {
+                            "id": "container2",
+                            "name": "backend-2",
+                            "image": "backend:v1"
+                        },
+                        "value": [timestamp, "1"]
+                    }
+                ]
+            return []
+    
+    service = MonitoringService(FakeClientWithMultiple(), Settings())
+    containers = await service.containers()
+    
+    # Should have two separate containers
+    assert len(containers) == 2
+    container_ids = {c.id for c in containers}
+    container_names = {c.name for c in containers}
+    assert container_ids == {"container1", "container2"}
+    assert container_names == {"backend-1", "backend-2"}
+
+
+@pytest.mark.anyio
+async def test_missing_container_id_skipped() -> None:
+    """Containers without IDs are safely skipped."""
+    
+    class FakeClientWithMissingId:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                return [
+                    {
+                        "metric": {
+                            "name": "some-container",
+                            "image": "image:latest"
+                            # Missing 'id' field
+                        },
+                        "value": [timestamp, "1"]
+                    },
+                    {
+                        "metric": {
+                            "id": "",  # Empty ID
+                            "name": "another-container",
+                            "image": "image:latest"
+                        },
+                        "value": [timestamp, "1"]
+                    },
+                    {
+                        "metric": {
+                            "id": "valid123",
+                            "name": "valid-container",
+                            "image": "image:latest"
+                        },
+                        "value": [timestamp, "1"]
+                    }
+                ]
+            return []
+    
+    service = MonitoringService(FakeClientWithMissingId(), Settings())
+    containers = await service.containers()
+    
+    # Only the valid container should be returned
+    assert len(containers) == 1
+    assert containers[0].id == "valid123"
+    assert containers[0].name == "valid-container"
+
+
+@pytest.mark.anyio
+async def test_container_status_remains_unknown() -> None:
+    """Container status is UNKNOWN when health info unavailable from cAdvisor."""
+    
+    class FakeClientWithContainer:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                return [
+                    {
+                        "metric": {
+                            "id": "xyz789",
+                            "name": "healthy-container",
+                            "image": "app:latest"
+                        },
+                        "value": [timestamp, "1"]
+                    }
+                ]
+            # Even with metrics, status should remain UNKNOWN
+            elif "container_cpu_usage" in query:
+                return [{"metric": {"id": "xyz789"}, "value": [timestamp, "0.1"]}]
+            elif "container_memory" in query:
+                return [{"metric": {"id": "xyz789"}, "value": [timestamp, "268435456"]}]
+            return []
+    
+    service = MonitoringService(FakeClientWithContainer(), Settings())
+    containers = await service.containers()
+    
+    assert len(containers) == 1
+    assert containers[0].status == "UNKNOWN"
+    # Metrics should still be present
+    assert containers[0].cpu_percent == 0.1
+    assert containers[0].memory_bytes == 268435456
+
+
+@pytest.mark.anyio
+async def test_container_metrics_preserved_after_deduplication() -> None:
+    """CPU, memory and network metrics are preserved after deduplication."""
+    
+    class FakeClientWithMetrics:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                # Duplicate time series for same container
+                return [
+                    {
+                        "metric": {"id": "test123", "name": "app-1", "image": "app:1.0"},
+                        "value": [timestamp, "1"]
+                    },
+                    {
+                        "metric": {"id": "test123", "name": "/app_1", "image": "app:1.0"},
+                        "value": [timestamp, "1"]
+                    }
+                ]
+            elif "container_cpu_usage" in query:
+                return [{"metric": {"id": "test123"}, "value": [timestamp, "0.75"]}]
+            elif "container_memory" in query:
+                return [{"metric": {"id": "test123"}, "value": [timestamp, "1073741824"]}]
+            elif "network_receive" in query:
+                return [{"metric": {"id": "test123"}, "value": [timestamp, "1048576"]}]
+            elif "network_transmit" in query:
+                return [{"metric": {"id": "test123"}, "value": [timestamp, "2097152"]}]
+            return []
+    
+    service = MonitoringService(FakeClientWithMetrics(), Settings())
+    containers = await service.containers()
+    
+    # Should be deduplicated to one container
+    assert len(containers) == 1
+    container = containers[0]
+    
+    # All metrics should be preserved
+    assert container.id == "test123"
+    assert container.cpu_percent == 0.75
+    assert container.memory_bytes == 1073741824
+    assert container.network_receive_bytes_per_second == 1048576
+    assert container.network_transmit_bytes_per_second == 2097152
+    assert container.last_observation is not None
+    assert container.availability == "available"

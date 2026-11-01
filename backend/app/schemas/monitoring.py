@@ -43,9 +43,16 @@ class MetricHistory(BaseModel):
 
 
 class ContainerStatus(BaseModel):
+    """
+    Container resource usage and status.
+    
+    Note: status field is UNKNOWN because cAdvisor does not expose Docker health-check
+    status or running state. Only resource metrics are available. To obtain true container
+    health status, Docker API integration would be required (future enhancement).
+    """
     id: str | None
     name: str
-    status: Literal["RUNNING", "UNKNOWN"]
+    status: Literal["RUNNING", "STOPPED", "UNHEALTHY", "UNKNOWN"]
     cpu_percent: float | None
     memory_bytes: float | None
     network_receive_bytes_per_second: float | None
