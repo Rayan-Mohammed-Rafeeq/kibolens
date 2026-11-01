@@ -38,7 +38,6 @@ services:
       KIBOLENS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-kibolens}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kibolens}
       KIBOLENS_CORS_ORIGINS: '["http://localhost:8080"]'
     volumes:
-      # RAG documents (read-only from HDD)
       - type: bind
         source: /mnt/kiboto-storage/kibolens-data/documents
         target: /app/documents
@@ -64,13 +63,14 @@ services:
         max-file: "3"
     networks: [kibolens]
 
-frontend:
+  frontend:
     build:
       context: ..
       dockerfile: deployment/Dockerfiles/frontend.Dockerfile
     ports:
       - "127.0.0.1:8080:80"
-    depends_on: [backend]
+    depends_on:
+      - backend
     restart: unless-stopped
     deploy:
       resources:
@@ -181,7 +181,9 @@ frontend:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     profiles: [monitoring]
-    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
     volumes:
       - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - type: bind
@@ -254,3 +256,4 @@ volumes:
     driver: local
   prometheus_data:
     driver: local
+
