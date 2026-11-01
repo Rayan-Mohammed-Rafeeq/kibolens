@@ -64,7 +64,7 @@ services:
         max-file: "3"
     networks: [kibolens]
 
-  frontend:
+frontend:
     build:
       context: ..
       dockerfile: deployment/Dockerfiles/frontend.Dockerfile
@@ -85,7 +85,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-     networks:
+    networks:
       - kibolens
       - frontend_ingress
 
@@ -246,7 +246,6 @@ services:
 networks:
   kibolens:
     internal: true
-
   frontend_ingress:
     driver: bridge
 
