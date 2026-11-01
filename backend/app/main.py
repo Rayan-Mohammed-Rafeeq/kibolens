@@ -3,13 +3,32 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ai.embeddings import get_embedding_service
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.services.qdrant import get_qdrant_service
+
+# Global Qdrant service instance
+_qdrant_service = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Application lifespan manager for startup and shutdown."""
+    global _qdrant_service
+    
+    # Startup: Initialize Qdrant service
+    settings = get_settings()
+    _qdrant_service = get_qdrant_service(settings)
+    
+    # Initialize embedding service to validate configuration
+    embedding_service = get_embedding_service(settings)
+    
     yield
+    
+    # Shutdown: Close Qdrant client
+    if _qdrant_service:
+        await _qdrant_service.close()
 
 
 def create_application() -> FastAPI:

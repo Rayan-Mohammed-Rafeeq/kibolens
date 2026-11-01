@@ -39,6 +39,7 @@ services:
     environment:
       KIBOLENS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-kibolens}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kibolens}
       KIBOLENS_CORS_ORIGINS: '["http://localhost:8080"]'
+      KIBOLENS_QDRANT_URL: http://qdrant:6333
     volumes:
       - type: bind
         source: /mnt/kiboto-storage/kibolens-data/documents
@@ -49,6 +50,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -66,6 +69,7 @@ services:
     networks:
       - kibolens
       - backend_egress
+      - rag
 
   frontend:
     build:
@@ -92,6 +96,31 @@ services:
     networks:
       - kibolens
       - frontend_ingress
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    volumes:
+      - type: bind
+        source: /mnt/kiboto-storage/kibolens-data/qdrant
+        target: /qdrant/storage
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+        reservations:
+          cpus: '0.25'
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - rag
 
   prometheus:
     image: prom/prometheus:v3.7.3
@@ -255,6 +284,9 @@ networks:
   backend_egress:
     driver: bridge
   frontend_ingress:
+    driver: bridge
+  rag:
+    internal: true
     driver: bridge
 
 volumes:

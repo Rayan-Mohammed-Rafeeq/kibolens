@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2000, ge=100, le=32000)
     llm_request_timeout_seconds: float = Field(default=120, gt=0, le=600)
 
+    # RAG / Vector Database Configuration
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    
+    # Embedding Configuration
+    embedding_model: str = Field(default="all-minilm")  # all-minilm, nomic-embed-text, mxbai-embed-large
+
     # Email/OTP Configuration
     resend_api_key: SecretStr | None = Field(default=None, alias="RESEND_API_KEY")
     email_from: str = Field(default="noreply@example.com")
