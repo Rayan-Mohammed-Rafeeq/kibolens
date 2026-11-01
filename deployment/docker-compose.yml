@@ -85,7 +85,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    networks: [kibolens]
+     networks:
+      - kibolens
+      - frontend_ingress
 
   prometheus:
     image: prom/prometheus:v3.7.3
@@ -244,6 +246,9 @@ services:
 networks:
   kibolens:
     internal: true
+
+  frontend_ingress:
+    driver: bridge
 
 volumes:
   postgres_data:
