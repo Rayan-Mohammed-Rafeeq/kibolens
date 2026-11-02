@@ -75,7 +75,7 @@ def test_provider_init_with_empty_key():
 
 def test_provider_init_with_no_key():
     """Test provider initialization without key."""
-    settings = Settings()
+    settings = Settings(gemini_api_key=None)
     provider = GeminiProvider(settings)
     
     assert provider.available is False

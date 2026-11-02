@@ -6,6 +6,8 @@ import pytest
 os.environ["KIBOLENS_ENVIRONMENT"] = "test"
 os.environ["KIBOLENS_DATABASE_URL"] = "sqlite://"
 os.environ["KIBOLENS_ALLOWED_EMAILS"] = "admin@example.com,other@example.com,rayanmohammedrafeeq@gmail.com,rakinmohammedrafeeq@gmail.com"
+# Force LLM provider to ollama for tests to avoid network calls to cloud providers
+os.environ["KIBOLENS_LLM_PROVIDER"] = "ollama"
 
 from app.api.dependencies import get_db
 from app.api.routes.auth import throttle
@@ -54,6 +56,8 @@ def client(database: Session) -> Generator[TestClient]:
 
     app.dependency_overrides[get_db] = override_database
     throttle.attempts.clear()
+    
     with TestClient(app) as test_client:
         yield test_client
+    
     app.dependency_overrides.clear()

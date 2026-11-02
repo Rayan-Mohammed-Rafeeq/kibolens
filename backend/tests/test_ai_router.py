@@ -220,8 +220,15 @@ async def test_gemini_rate_limit_falls_back_to_openrouter(router: AIRouter):
 
 @pytest.mark.asyncio
 async def test_gemini_timeout_falls_back(router: AIRouter):
-    """Gemini timeout triggers fallback to OpenRouter."""
+    """Gemini timeout triggers fallback to Groq (then OpenRouter if Groq also fails)."""
     import httpx
+
+    groq_resp = MagicMock()
+    groq_resp.status_code = 200
+    groq_resp.json.return_value = {
+        "choices": [{"message": {"content": "Timeout fallback"}}],
+        "model": "llama-3.3-70b-versatile",
+    }
 
     or_catalogue_resp = MagicMock()
     or_catalogue_resp.status_code = 200
@@ -234,6 +241,8 @@ async def test_gemini_timeout_falls_back(router: AIRouter):
     async def fake_post(url, **kwargs):
         if "googleapis" in url:
             raise httpx.TimeoutException("timed out")
+        if "groq.com" in url:
+            return groq_resp
         return or_gen_resp
 
     async def fake_get(url, **kwargs):
@@ -249,7 +258,8 @@ async def test_gemini_timeout_falls_back(router: AIRouter):
 
         result = await router.generate_text("Slow query")
 
-    assert result.successful_provider == ProviderName.OPENROUTER
+    # Should succeed at Groq after Gemini timeout
+    assert result.successful_provider == ProviderName.GROQ
     timeout_attempts = [
         a for a in result.attempts if a.failure_category == FailureCategory.TIMEOUT
     ]
@@ -262,10 +272,17 @@ async def test_gemini_timeout_falls_back(router: AIRouter):
 
 @pytest.mark.asyncio
 async def test_openrouter_fallback_on_gemini_500(router: AIRouter):
-    """Gemini returns 503 → OpenRouter succeeds."""
+    """Gemini returns 503 → Groq succeeds (or OpenRouter if Groq fails)."""
     gemini_err = MagicMock()
     gemini_err.status_code = 503
     gemini_err.text = "Service temporarily unavailable"
+
+    groq_resp = MagicMock()
+    groq_resp.status_code = 200
+    groq_resp.json.return_value = {
+        "choices": [{"message": {"content": "Groq saved the day"}}],
+        "model": "llama-3.3-70b-versatile",
+    }
 
     or_catalogue_resp = MagicMock()
     or_catalogue_resp.status_code = 200
@@ -278,6 +295,8 @@ async def test_openrouter_fallback_on_gemini_500(router: AIRouter):
     async def fake_post(url, **kwargs):
         if "googleapis" in url:
             return gemini_err
+        if "groq.com" in url:
+            return groq_resp
         return or_ok
 
     async def fake_get(url, **kwargs):
@@ -291,10 +310,12 @@ async def test_openrouter_fallback_on_gemini_500(router: AIRouter):
         instance.get = AsyncMock(side_effect=fake_get)
         mock_client_cls.return_value = instance
 
-        result = await router.generate_text("Diagnose error")
+        result = await router.generate_text("CPU high")
 
-    assert result.successful_provider == ProviderName.OPENROUTER
-    assert "OpenRouter saved the day" in result.content
+    # Should succeed at Groq after Gemini 503
+    assert result.successful_provider == ProviderName.GROQ
+    assert "saved the day" in result.content.lower()
+    assert result.unavailable is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -746,6 +767,94 @@ def test_ollama_provider_available_for_rollback():
     )
     provider = get_llm_provider(ollama_settings)
     assert isinstance(provider, OllamaProvider)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P. Cloud routing with individual provider availability
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cloud_routing_available_with_gemini_only():
+    """Cloud routing reports available when only Gemini has API key."""
+    from app.ai.llm.factory import get_llm_provider, CloudRouterAdapter
+
+    gemini_only_settings = Settings(
+        database_url="sqlite://",
+        llm_provider="cloud",
+        gemini_api_key="test-gemini-key",
+        groq_api_key=None,
+        openrouter_api_key=None,
+        ai_free_only=True,
+    )
+    provider = get_llm_provider(gemini_only_settings)
+    assert isinstance(provider, CloudRouterAdapter)
+    
+    # Should report available with Gemini alone
+    is_available = await provider.health_check()
+    assert is_available is True
+
+
+@pytest.mark.asyncio
+async def test_cloud_routing_available_with_groq_only():
+    """Cloud routing reports available when only Groq has API key."""
+    from app.ai.llm.factory import get_llm_provider, CloudRouterAdapter
+
+    groq_only_settings = Settings(
+        database_url="sqlite://",
+        llm_provider="cloud",
+        gemini_api_key=None,
+        groq_api_key="test-groq-key",
+        openrouter_api_key=None,
+        ai_free_only=True,
+    )
+    provider = get_llm_provider(groq_only_settings)
+    assert isinstance(provider, CloudRouterAdapter)
+    
+    # Should report available with Groq alone
+    is_available = await provider.health_check()
+    assert is_available is True
+
+
+@pytest.mark.asyncio
+async def test_cloud_routing_available_with_openrouter_only():
+    """Cloud routing reports available when only OpenRouter has API key."""
+    from app.ai.llm.factory import get_llm_provider, CloudRouterAdapter
+
+    openrouter_only_settings = Settings(
+        database_url="sqlite://",
+        llm_provider="cloud",
+        gemini_api_key=None,
+        groq_api_key=None,
+        openrouter_api_key="test-openrouter-key",
+        ai_free_only=True,
+    )
+    provider = get_llm_provider(openrouter_only_settings)
+    assert isinstance(provider, CloudRouterAdapter)
+    
+    # Should report available with OpenRouter alone
+    is_available = await provider.health_check()
+    assert is_available is True
+
+
+@pytest.mark.asyncio
+async def test_cloud_routing_unavailable_without_any_keys():
+    """Cloud routing reports unavailable when no provider has API key."""
+    from app.ai.llm.factory import get_llm_provider, CloudRouterAdapter
+
+    no_keys_settings = Settings(
+        database_url="sqlite://",
+        llm_provider="cloud",
+        gemini_api_key=None,
+        groq_api_key=None,
+        openrouter_api_key=None,
+        ai_free_only=True,
+    )
+    provider = get_llm_provider(no_keys_settings)
+    assert isinstance(provider, CloudRouterAdapter)
+    
+    # Should report unavailable without any keys
+    is_available = await provider.health_check()
+    assert is_available is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

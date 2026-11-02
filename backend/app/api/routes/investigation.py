@@ -49,7 +49,7 @@ async def investigate_issue(
         )
 
         # Create investigator (uses cloud router by default, or Ollama if configured)
-        investigator = get_investigator(
+        investigator = await get_investigator(
             settings=settings,
             document_service=document_service,
             incident_service=None,  # TODO: Add incident context with proper DB session

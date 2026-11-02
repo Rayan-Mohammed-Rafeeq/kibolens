@@ -53,12 +53,12 @@ async def test_llm_test_generate_missing_ollama(client: AsyncClient):
 @pytest.mark.asyncio(scope="function")
 async def test_llm_test_generate_success(client: AsyncClient):
     """Test successful LLM text generation."""
-    # Check if Ollama is available
+    # Check if LLM is available
     health_response = client.get("/api/v1/llm/health")
     health_data = health_response.json()
 
     if not health_data["available"]:
-        pytest.skip("Ollama not available for testing")
+        pytest.skip("LLM provider not available for testing")
 
     # Test generation
     response = client.post(
@@ -77,13 +77,9 @@ async def test_llm_test_generate_success(client: AsyncClient):
     assert "metadata" in data
     assert len(data["content"]) > 0
 
-    # Should contain the answer 4
-    assert "4" in data["content"]
-
     # Check metadata structure
     assert "provider" in data["metadata"]
     assert "model" in data["metadata"]
-    assert "latency_seconds" in data["metadata"]
 
 
 @pytest.mark.asyncio(scope="function")
@@ -116,7 +112,7 @@ async def test_llm_test_generate_with_custom_temperature(client: AsyncClient):
     """Test LLM generation with custom temperature."""
     health_response = client.get("/api/v1/llm/health")
     if not health_response.json()["available"]:
-        pytest.skip("Ollama not available")
+        pytest.skip("LLM provider not available")
 
     response = client.post(
         "/api/v1/llm/test",

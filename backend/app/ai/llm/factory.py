@@ -131,11 +131,18 @@ Respond ONLY with the JSON object. Do not include explanations, markdown formatt
         )
 
     async def health_check(self) -> bool:
+        """Check if ANY cloud provider is available.
+        
+        Cloud routing is available if ANY of Gemini, Groq, or OpenRouter
+        has a valid API key configured. Provider-first fallback ensures
+        the system remains operational with any single provider.
+        """
         router = await self._get_router()
         status = await router.health_status()
         gemini_up = status["providers"]["gemini"]["available"]
+        groq_up = status["providers"]["groq"]["available"]
         openrouter_up = status["providers"]["openrouter"]["available"]
-        return gemini_up or openrouter_up
+        return gemini_up or groq_up or openrouter_up
 
 
 def get_llm_provider(settings: Settings | None = None) -> BaseLLMProvider:

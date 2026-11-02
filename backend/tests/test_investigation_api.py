@@ -83,10 +83,12 @@ async def test_investigate_with_error(client, database, create_test_session):
         "timestamp": "2024-01-01T00:00:00",
     }
     
-    with patch("app.ai.investigator.AIInvestigator") as mock_investigator_class:
+    # Mock the get_investigator factory to return a mock investigator
+    # This works for both cloud and ollama modes
+    with patch("app.api.routes.investigation.get_investigator") as mock_get_investigator:
         mock_investigator = AsyncMock()
         mock_investigator.investigate.return_value = mock_result
-        mock_investigator_class.return_value = mock_investigator
+        mock_get_investigator.return_value = mock_investigator
         
         response = client.post(
             "/api/v1/investigate",

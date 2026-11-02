@@ -472,13 +472,16 @@ class AIInvestigator:
             }
 
 
-def get_investigator(
+async def get_investigator(
     settings: Settings,
     document_service: DocumentService | None = None,
     incident_service: IncidentService | None = None,
     prometheus_client: PrometheusClient | None = None,
-) -> AIInvestigator:
+):
     """Factory function to create AI investigator.
+    
+    Routes to cloud-based investigator when llm_provider=cloud (default),
+    or legacy Ollama investigator when llm_provider=ollama.
     
     Args:
         settings: Application settings
@@ -487,8 +490,19 @@ def get_investigator(
         prometheus_client: Optional Prometheus client
         
     Returns:
-        AIInvestigator instance
+        AIInvestigator or CloudAIInvestigator instance
     """
+    if settings.llm_provider.lower() == "cloud":
+        # Use cloud investigator (Gemini → Groq → OpenRouter)
+        from app.ai.cloud_investigator import get_cloud_investigator
+        return await get_cloud_investigator(
+            settings=settings,
+            document_service=document_service,
+            incident_service=incident_service,
+            prometheus_client=prometheus_client,
+        )
+    
+    # Legacy Ollama investigator
     return AIInvestigator(
         settings,
         document_service=document_service,

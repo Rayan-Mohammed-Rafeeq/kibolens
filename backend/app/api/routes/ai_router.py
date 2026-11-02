@@ -95,8 +95,9 @@ class LLMTestResponse(BaseModel):
 async def llm_health_check(settings: Settings = Depends(get_settings)):
     """Check LLM / AI router health (backward-compatible endpoint).
 
-    Returns provider availability.  When cloud routing is active, returns
-    routing_active=True and the name of the first available provider.
+    Returns provider availability. When cloud routing is active, returns
+    routing_active=True and describes the exhaustive provider-first fallback
+    chain: Gemini → Groq → OpenRouter → openrouter/free.
     """
     from app.ai.llm.factory import get_llm_provider
 
@@ -106,7 +107,7 @@ async def llm_health_check(settings: Settings = Depends(get_settings)):
     if settings.llm_provider.lower() == "cloud":
         return LLMHealthResponse(
             provider="cloud-router",
-            model="gemini/openrouter-auto",
+            model="gemini → groq → openrouter/free",
             base_url="https://generativelanguage.googleapis.com",
             available=is_available,
             routing_active=True,
