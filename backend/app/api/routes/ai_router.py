@@ -32,7 +32,6 @@ class AIHealthResponse(BaseModel):
 
     free_only_mode: bool
     allow_paid_models: bool
-    max_model_attempts: int
     providers: dict
 
 

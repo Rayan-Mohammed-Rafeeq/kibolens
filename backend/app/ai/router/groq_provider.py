@@ -68,17 +68,20 @@ _VISION_MODEL_SUBSTRINGS = (
 # DO NOT add models unless you have verified free-plan eligibility.
 # Presence in /models endpoint is NOT sufficient proof.
 _GROQ_VERIFIED_FREE_MODEL_IDS = frozenset({
-    # Llama 3.3 (free-plan confirmed)
-    "llama-3.3-70b-versatile",
+    # NOTE: Deprecated model IDs removed per 2026-10-31 final audit.
+    # Removed: llama-3.3-70b-versatile, llama-3.1-70b-versatile, llama-3.1-8b-instant (deprecated),
+    #          deprecated Llama vision preview IDs.
+    #
+    # MINIMAL REGISTRY - Dynamic discovery from Groq's /models API is primary source.
+    # Only explicitly verified current free-plan models listed here.
+    
+    # Llama 3.3 speculative decoding (free-plan confirmed, actively supported)
     "llama-3.3-70b-specdec",
-    # Llama 3.2 (free-plan confirmed)
+    # Llama 3.2 current (free-plan confirmed)
     "llama-3.2-1b-preview",
     "llama-3.2-3b-preview",
     "llama-3.2-11b-vision-preview",
     "llama-3.2-90b-vision-preview",
-    # Llama 3.1 (free-plan confirmed)
-    "llama-3.1-8b-instant",
-    "llama-3.1-70b-versatile",
     # Mixtral (free-plan confirmed)
     "mixtral-8x7b-32768",
     # Gemma 2 (free-plan confirmed)
@@ -86,28 +89,20 @@ _GROQ_VERIFIED_FREE_MODEL_IDS = frozenset({
     "gemma-7b-it",
     # DeepSeek (free-plan confirmed)
     "deepseek-r1-distill-llama-70b",
-    # Qwen (free-plan confirmed for these)
+    # Qwen (free-plan confirmed - verify qwen/qwen3.8-27b format via live API)
     "qwen-2.5-32b",
     "qwen-3.8-27b",
 })
 
 # Default verified Free-plan candidate models
 _DEFAULT_GROQ_TEXT_MODELS: list[dict[str, Any]] = [
+    # NOTE: Deprecated model IDs removed per 2026-10-31 final audit.
+    # Removed: llama-3.3-70b-versatile, llama-3.1-70b-versatile, llama-3.1-8b-instant (deprecated).
+    #
+    # MINIMAL REGISTRY - Dynamic discovery from Groq's /models API is primary source.
+    # Only explicitly verified current free-plan models listed here.
+    
     # ADVANCED
-    {
-        "model_id": "llama-3.3-70b-versatile",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 10,
-        "context_limit": 131072,
-        "is_preview": False,
-    },
-    {
-        "model_id": "llama-3.1-70b-versatile",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 15,
-        "context_limit": 131072,
-        "is_preview": False,
-    },
     {
         "model_id": "deepseek-r1-distill-llama-70b",
         "quality_tier": QualityTier.ADVANCED,
@@ -116,13 +111,6 @@ _DEFAULT_GROQ_TEXT_MODELS: list[dict[str, Any]] = [
         "is_preview": True,
     },
     # BALANCED
-    {
-        "model_id": "llama-3.1-8b-instant",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 20,
-        "context_limit": 131072,
-        "is_preview": False,
-    },
     {
         "model_id": "mixtral-8x7b-32768",
         "quality_tier": QualityTier.BALANCED,

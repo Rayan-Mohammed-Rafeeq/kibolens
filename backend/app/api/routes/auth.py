@@ -39,6 +39,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+# Testing Mode - Login throttle DISABLED (max attempts set to 999999)
 throttle = LoginThrottle(get_settings().login_max_attempts)
 
 

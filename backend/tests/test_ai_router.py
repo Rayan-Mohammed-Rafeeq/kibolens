@@ -66,7 +66,6 @@ def free_only_settings() -> Settings:
         openrouter_api_key="test-or-key",   # type: ignore[arg-type]
         ai_free_only=True,
         ai_allow_paid_models=False,
-        ai_max_model_attempts=6,
         ai_provider_timeout_seconds=10.0,
         ai_model_catalog_refresh_hours=24.0,
         llm_temperature=0.1,

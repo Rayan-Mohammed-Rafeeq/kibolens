@@ -49,126 +49,13 @@ logger = logging.getLogger(__name__)
 # Models must be in _GEMINI_VERIFIED_FREE_MODEL_IDS set.
 # ---------------------------------------------------------------------------
 _GEMINI_TEXT_REGISTRY: list[dict[str, Any]] = [
-    # ADVANCED — Latest generation flagship flash models (free-tier VERIFIED)
-    {
-        "model_id": "gemini-2.0-flash-exp",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 5,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-exp-1206",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 10,
-        "context_limit": 2_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-exp-1121",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 12,
-        "context_limit": 2_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    # BALANCED — Stable production flash models (free-tier VERIFIED)
-    {
-        "model_id": "gemini-2.0-flash",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 20,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 25,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-latest",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 27,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-002",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 29,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-001",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 31,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    # FAST — Lightweight and experimental flash variants (free-tier VERIFIED)
-    {
-        "model_id": "gemini-1.5-flash-8b",
-        "quality_tier": QualityTier.FAST,
-        "priority": 40,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-8b-latest",
-        "quality_tier": QualityTier.FAST,
-        "priority": 42,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-8b-001",
-        "quality_tier": QualityTier.FAST,
-        "priority": 44,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-8b-exp-0827",
-        "quality_tier": QualityTier.FAST,
-        "priority": 46,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-exp-0827",
-        "quality_tier": QualityTier.FAST,
-        "priority": 48,
-        "context_limit": 2_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
+    # NOTE: All explicitly retired model IDs removed per 2026-10-31 final audit.
+    # Removed: gemini-2.0-flash-exp, gemini-exp-1206, gemini-exp-1121, gemini-2.0-flash,
+    #          gemini-1.5-flash*, all 1.5-flash-8b* variants (retired by Google).
+    # Registry intentionally minimal - dynamic discovery from Google's /models API is primary.
+    # Only include models whose current free-tier eligibility is explicitly verified.
+    
+    # Current experimental flash (free while in preview - verify via live catalogue)
     {
         "model_id": "gemini-flash-exp",
         "quality_tier": QualityTier.FAST,
@@ -186,126 +73,13 @@ _GEMINI_TEXT_REGISTRY: list[dict[str, Any]] = [
 # ONLY includes models with VERIFIED free-tier eligibility + vision support.
 # ---------------------------------------------------------------------------
 _GEMINI_VISION_REGISTRY: list[dict[str, Any]] = [
-    # ADVANCED — Latest generation flagship vision flash models (free-tier VERIFIED)
-    {
-        "model_id": "gemini-2.0-flash-exp",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 5,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-exp-1206",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 10,
-        "context_limit": 2_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-exp-1121",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 12,
-        "context_limit": 2_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    # BALANCED — Stable production vision flash models (free-tier VERIFIED)
-    {
-        "model_id": "gemini-2.0-flash",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 20,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 25,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-latest",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 27,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-002",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 29,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-001",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 31,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    # FAST — Lightweight and experimental vision flash variants (free-tier VERIFIED)
-    {
-        "model_id": "gemini-1.5-flash-8b",
-        "quality_tier": QualityTier.FAST,
-        "priority": 40,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-8b-latest",
-        "quality_tier": QualityTier.FAST,
-        "priority": 42,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-8b-001",
-        "quality_tier": QualityTier.FAST,
-        "priority": 44,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-8b-exp-0827",
-        "quality_tier": QualityTier.FAST,
-        "priority": 46,
-        "context_limit": 1_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
-    {
-        "model_id": "gemini-1.5-flash-exp-0827",
-        "quality_tier": QualityTier.FAST,
-        "priority": 48,
-        "context_limit": 2_000_000,
-        "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
-        "prompt_price_usd": 0.0,
-        "completion_price_usd": 0.0,
-    },
+    # NOTE: All explicitly retired model IDs removed per 2026-10-31 final audit.
+    # Removed: gemini-2.0-flash-exp, gemini-exp-1206, gemini-exp-1121, gemini-2.0-flash,
+    #          gemini-1.5-flash*, all 1.5-flash-8b* variants (retired by Google).
+    # Registry intentionally minimal - dynamic discovery from Google's /models API is primary.
+    # Only include models whose current free-tier eligibility AND vision support are verified.
+    
+    # Current experimental flash with vision (free while in preview - verify via live catalogue)
     {
         "model_id": "gemini-flash-exp",
         "quality_tier": QualityTier.FAST,
@@ -338,23 +112,18 @@ _VISION_CAPABLE_PATTERNS = (
 # DO NOT add models unless you have verified free-tier eligibility.
 # Presence in /models endpoint is NOT sufficient proof.
 _GEMINI_VERIFIED_FREE_MODEL_IDS = frozenset({
-    # 1.5 Generation (stable, free-tier confirmed)
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-001",
-    "gemini-1.5-flash-002",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-flash-8b-001",
-    "gemini-1.5-flash-8b-latest",
-    "gemini-1.5-flash-8b-exp-0827",
-    "gemini-1.5-flash-exp-0827",
-    # 2.0 Generation (free-tier confirmed)
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-exp",
-    # Experimental models (free while in preview)
-    "gemini-exp-1206",
-    "gemini-exp-1121",
+    # NOTE: All explicitly retired model IDs removed per 2026-10-31 final audit.
+    # Removed: gemini-2.0-flash-exp, gemini-exp-1206, gemini-exp-1121, gemini-2.0-flash,
+    #          gemini-1.5-flash, gemini-1.5-flash-latest, gemini-1.5-flash-002, gemini-1.5-flash-001,
+    #          gemini-1.5-flash-8b, gemini-1.5-flash-8b-latest, gemini-1.5-flash-8b-001,
+    #          gemini-1.5-flash-8b-exp-0827, gemini-1.5-flash-exp-0827 (all retired by Google).
+    #
+    # MINIMAL REGISTRY - Dynamic discovery from Google's /models API is primary source.
+    # Only explicitly verified current free-tier models listed here.
+    
+    # Current experimental flash (free while in preview)
     "gemini-flash-exp",
+    
     # Note: gemini-3.x models are FUTURE/HYPOTHETICAL
     # Do NOT include unless Google confirms free-tier access
 })

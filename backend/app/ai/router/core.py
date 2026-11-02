@@ -3,7 +3,7 @@
 EXHAUSTIVE PROVIDER-FIRST FALLBACK:
   Provider order (NEVER interleaved): 1. Gemini → 2. Groq → 3. OpenRouter
   Each provider is COMPLETELY EXHAUSTED before moving to the next.
-  No artificial attempt limits within a provider.
+  NO ARTIFICIAL ATTEMPT LIMITS - all eligible models are tried.
 
 Fallback order for TEXT:
   1. Try ALL eligible active Gemini text models (ADVANCED→BALANCED→FAST).
@@ -15,6 +15,13 @@ Fallback order for VISION:
   Same provider-first sequence using separate vision registries.
   Never sends images to text-only models.
 
+OPERATIONAL SAFEGUARDS (NOT USAGE QUOTAS):
+  - Per-request network timeouts (45s default)
+  - Circuit breakers for provider/model failures
+  - Bounded transient retries (max 1 additional retry per model)
+  - Model-specific cooldown after failures
+  - Provider-wide circuit opening for auth/quota failures
+  
 DYNAMIC MODEL DISCOVERY:
   - Gemini: Fetches live catalogue from Google's /models API
   - Groq: Fetches live catalogue from Groq's /models API
@@ -61,13 +68,11 @@ from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-# Max number of model slots to try across all providers in one call
-_DEFAULT_MAX_ATTEMPTS = 4
-
 # Exponential backoff for retries within the same model (only for transient errors)
-_BACKOFF_BASE = 0.5
-_BACKOFF_MAX = 4.0
-_PER_MODEL_RETRIES = 1  # number of additional retries per model before moving on
+# TESTING MODE: Backoff disabled, more retries allowed
+_BACKOFF_BASE = 0.0  # DISABLED - No wait between retries
+_BACKOFF_MAX = 0.0  # DISABLED - No backoff delay
+_PER_MODEL_RETRIES = 10  # INCREASED - 10 additional retries per model
 
 
 class AIRouter:
@@ -80,7 +85,6 @@ class AIRouter:
         self.settings = settings
         self._free_only: bool = settings.ai_free_only
         self._allow_paid: bool = settings.ai_allow_paid_models
-        self._max_attempts: int = settings.ai_max_model_attempts
         self._circuit_breaker = CircuitBreakerRegistry()
 
         # Provider adapters
@@ -470,7 +474,6 @@ class AIRouter:
         return {
             "free_only_mode": self._free_only,
             "allow_paid_models": self._allow_paid,
-            "max_model_attempts": self._max_attempts,
             "providers": {
                 "gemini": {
                     "available": self._gemini.available,

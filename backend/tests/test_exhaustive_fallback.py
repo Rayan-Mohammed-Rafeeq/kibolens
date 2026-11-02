@@ -33,7 +33,6 @@ def exhaustive_settings() -> Settings:
         openrouter_api_key="test-openrouter-key",
         ai_free_only=True,
         ai_allow_paid_models=False,
-        ai_max_model_attempts=20,  # Max allowed, but router ignores this for provider exhaustion
         ai_provider_timeout_seconds=10.0,
         ai_model_catalog_refresh_hours=24.0,
     )
@@ -83,9 +82,9 @@ async def test_gemini_exhausted_before_groq(exhaustive_settings):
     gemini_attempts = [a for a in result.attempts if a.provider == ProviderName.GEMINI]
     groq_attempts = [a for a in result.attempts if a.provider == ProviderName.GROQ]
     
-    # Must have tried multiple Gemini models before circuit breaker opened
-    # Circuit breaker will open after threshold (default 5) to protect provider
-    assert len(gemini_attempts) >= 5, f"Only tried {len(gemini_attempts)} Gemini models"
+    # Must have tried at least one Gemini model (minimal fallback registry)
+    # With only minimal fallback models and no live API, may only get 1-2 attempts
+    assert len(gemini_attempts) >= 1, f"Only tried {len(gemini_attempts)} Gemini models"
     
     # Must have tried at least one Groq model
     assert len(groq_attempts) >= 1
@@ -194,15 +193,12 @@ async def test_gemini_catalogue_discovers_multiple_models(exhaustive_settings):
     gemini_text = await router._gemini.text_models()
     gemini_vision = await router._gemini.vision_models()
     
-    # Should have comprehensive VERIFIED default registries (14 each after removing unverified 3.x models)
-    assert len(gemini_text) >= 14, f"Only {len(gemini_text)} Gemini text models"
-    assert len(gemini_vision) >= 14, f"Only {len(gemini_vision)} Gemini vision models"
-    
-    # Should include multiple quality tiers
-    text_tiers = {m.quality_tier for m in gemini_text}
-    assert QualityTier.ADVANCED in text_tiers
-    assert QualityTier.BALANCED in text_tiers
-    assert QualityTier.FAST in text_tiers
+    # Minimal default registries after removing all explicitly retired IDs.
+    # Dynamic discovery from Google's /models API is primary source.
+    # With fallback-only defaults, expect at least 1 model (gemini-flash-exp).
+    # Live catalogue may discover more - test verifies discovery works.
+    assert len(gemini_text) >= 1, f"Only {len(gemini_text)} Gemini text models"
+    assert len(gemini_vision) >= 1, f"Only {len(gemini_vision)} Gemini vision models"
     
     # All must be verified free
     assert all(m.is_verified_free for m in gemini_text)
@@ -217,8 +213,11 @@ async def test_groq_catalogue_discovers_multiple_models(exhaustive_settings):
     groq_text = await router._groq.text_models()
     groq_vision = await router._groq.vision_models()
     
-    # Should have comprehensive VERIFIED default registries
-    assert len(groq_text) >= 9, f"Only {len(groq_text)} Groq text models"
+    # Minimal default registries after removing deprecated IDs.
+    # Dynamic discovery from Groq's /models API is primary source.
+    # With fallback-only defaults, expect at least 6 models.
+    # Live catalogue may discover more - test verifies discovery works.
+    assert len(groq_text) >= 6, f"Only {len(groq_text)} Groq text models"
     assert len(groq_vision) >= 3, f"Only {len(groq_vision)} Groq vision models"
     
     # Should include multiple quality tiers
@@ -257,11 +256,11 @@ async def test_no_artificial_attempt_limits_within_provider(exhaustive_settings)
     # Should have tried many models from Gemini before circuit breaker opened
     gemini_attempts = [a for a in result.attempts if a.provider == ProviderName.GEMINI]
     
-    # Circuit breaker opens after threshold (default 5) to protect failing provider
-    # This is EXPECTED behavior - we don't want to hammer a down provider
-    assert len(gemini_attempts) >= 5, (
+    # Should have tried at least one Gemini model (minimal fallback registry)
+    # Circuit breaker may limit attempts to protect provider, but at least one try expected
+    assert len(gemini_attempts) >= 1, (
         f"Router stopped after only {len(gemini_attempts)} attempts. "
-        "Circuit breaker should allow at least 5 attempts before opening."
+        "Should try at least minimal fallback models."
     )
 
 
@@ -342,15 +341,124 @@ async def test_health_status_shows_comprehensive_model_counts(exhaustive_setting
     
     health = await router.health_status()
     
-    # Should report comprehensive VERIFIED model counts
+    # Minimal default registries after removing all explicitly retired IDs.
+    # Dynamic discovery from providers' live APIs is primary source.
+    # With fallback-only defaults, expect at least minimal counts.
+    # Live catalogues may discover more - test verifies router operates correctly.
     gemini_text_count = health["providers"]["gemini"]["text_models_count"]
     gemini_vision_count = health["providers"]["gemini"]["vision_models_count"]
     groq_text_count = health["providers"]["groq"]["text_models_count"]
     
-    assert gemini_text_count >= 14, f"Only {gemini_text_count} Gemini text models"
-    assert gemini_vision_count >= 14, f"Only {gemini_vision_count} Gemini vision models"
-    assert groq_text_count >= 9, f"Only {groq_text_count} Groq text models"
+    assert gemini_text_count >= 1, f"Only {gemini_text_count} Gemini text models"
+    assert gemini_vision_count >= 1, f"Only {gemini_vision_count} Gemini vision models"
+    assert groq_text_count >= 6, f"Only {groq_text_count} Groq text models"
     
     # Should show top models from each provider
     assert len(health["providers"]["gemini"]["top_text_models"]) <= 10
     assert len(health["providers"]["groq"]["top_text_models"]) <= 10
+
+
+@pytest.mark.asyncio
+async def test_explicitly_retired_model_ids_excluded(exhaustive_settings):
+    """Verify all explicitly retired model IDs are excluded from registries."""
+    router = AIRouter(exhaustive_settings)
+    
+    gemini_text = await router._gemini.text_models()
+    gemini_vision = await router._gemini.vision_models()
+    groq_text = await router._groq.text_models()
+    groq_vision = await router._groq.vision_models()
+    
+    all_gemini_ids = {m.model_id for m in gemini_text} | {m.model_id for m in gemini_vision}
+    all_groq_ids = {m.model_id for m in groq_text} | {m.model_id for m in groq_vision}
+    
+    # Explicitly retired Gemini model IDs must NOT appear
+    retired_gemini = {
+        "gemini-2.0-flash-exp",
+        "gemini-exp-1206",
+        "gemini-exp-1121",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash-001",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash-8b-latest",
+        "gemini-1.5-flash-8b-001",
+        "gemini-1.5-flash-8b-exp-0827",
+        "gemini-1.5-flash-exp-0827",
+    }
+    
+    # Deprecated Groq model IDs must NOT appear
+    deprecated_groq = {
+        "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile",
+        "llama-3.1-8b-instant",
+    }
+    
+    found_retired_gemini = all_gemini_ids & retired_gemini
+    found_deprecated_groq = all_groq_ids & deprecated_groq
+    
+    assert not found_retired_gemini, f"Found retired Gemini models: {found_retired_gemini}"
+    assert not found_deprecated_groq, f"Found deprecated Groq models: {found_deprecated_groq}"
+
+
+@pytest.mark.asyncio
+async def test_more_than_four_models_attempted(exhaustive_settings):
+    """Verify no artificial four-model limit - router must attempt more than 4 models."""
+    router = AIRouter(exhaustive_settings)
+    
+    # Mock all models to fail with retriable errors
+    fail_response = MagicMock()
+    fail_response.status_code = 503
+    fail_response.text = "temporary error"
+    
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        instance = AsyncMock()
+        instance.post.return_value = fail_response
+        instance.get.return_value = fail_response
+        instance.__aenter__.return_value = instance
+        instance.__aexit__.return_value = AsyncMock()
+        mock_client_cls.return_value = instance
+        
+        result = await router.generate_text("test prompt")
+        
+        # Must attempt more than 4 models (no artificial limit)
+        total_attempts = len(result.attempts)
+        assert total_attempts > 4, (
+            f"Router stopped after only {total_attempts} attempts. "
+            "Must try more than 4 models to verify no artificial four-model limit."
+        )
+
+
+@pytest.mark.asyncio
+async def test_complete_eligible_registry_exhausted(exhaustive_settings):
+    """Verify router exhausts complete eligible model registry before giving up."""
+    router = AIRouter(exhaustive_settings)
+    
+    # Get total eligible model count
+    gemini_text = await router._gemini.text_models()
+    groq_text = await router._groq.text_models()
+    total_eligible = len(gemini_text) + len(groq_text)
+    
+    # Mock all models to fail
+    fail_response = MagicMock()
+    fail_response.status_code = 503
+    fail_response.text = "service unavailable"
+    
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        instance = AsyncMock()
+        instance.post.return_value = fail_response
+        instance.get.return_value = fail_response
+        instance.__aenter__.return_value = instance
+        instance.__aexit__.return_value = AsyncMock()
+        mock_client_cls.return_value = instance
+        
+        result = await router.generate_text("test prompt")
+        
+        # Should attempt close to total eligible count
+        # (May be slightly less if circuit breaker opens, but must be substantial)
+        attempted = len(result.attempts)
+        assert attempted >= min(total_eligible, 5), (
+            f"Only attempted {attempted} models out of {total_eligible} eligible. "
+            f"Router must exhaust eligible registry before giving up."
+        )

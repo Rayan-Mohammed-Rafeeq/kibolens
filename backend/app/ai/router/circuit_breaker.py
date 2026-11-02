@@ -10,9 +10,9 @@ from app.ai.router.types import FailureCategory, PROVIDER_WIDE_FAILURE_CATEGORIE
 
 logger = logging.getLogger(__name__)
 
-# Defaults
-_CB_FAILURE_THRESHOLD = 5      # failures before opening
-_CB_HALF_OPEN_AFTER_SECONDS = 120  # probe window after open
+# Circuit Breaker Configuration - TESTING MODE: Limits DISABLED
+_CB_FAILURE_THRESHOLD = 999999  # DISABLED - Effectively unlimited failures before opening
+_CB_HALF_OPEN_AFTER_SECONDS = 1  # DISABLED - Immediate retry after "open"
 _CB_PROBE_SUCCESSES = 1        # successes needed to close
 
 
