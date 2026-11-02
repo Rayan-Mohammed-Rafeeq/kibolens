@@ -86,6 +86,8 @@ async def notify_incident(
             )
         ) + f"<p>{escape(incident.description)}</p><p><a href='{escape(link, quote=True)}'>Open incident and investigate with AI</a></p></body></html>"
         try:
+            delivery.attempts += 1
+            delivery.last_attempt_at = datetime.now(UTC)
             provider_id = await asyncio.to_thread(service.send_incident_email, recipient, subject, text, html)
             delivery.status = "sent"
             delivery.provider_id = provider_id
@@ -98,3 +100,22 @@ async def notify_incident(
             sent.append({"recipient": recipient, "status": "failed"})
         db.flush()
     return sent
+
+
+async def retry_failed_notifications(db: Session, settings: Settings, limit: int = 20) -> int:
+    """Retry failed incident notifications at most twice after the first try."""
+    failed = db.scalars(
+        select(EmailNotification)
+        .where(EmailNotification.status == "failed", EmailNotification.attempts < 3)
+        .order_by(EmailNotification.last_attempt_at)
+        .limit(limit)
+    ).all()
+    retried = 0
+    for delivery in failed:
+        incident = db.get(Incident, delivery.incident_id) if delivery.incident_id else None
+        if incident is None:
+            continue
+        await notify_incident(db, incident, delivery.event_key, settings, [delivery.recipient])
+        retried += 1
+    db.commit()
+    return retried

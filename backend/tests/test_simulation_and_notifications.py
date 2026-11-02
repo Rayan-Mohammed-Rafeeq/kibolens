@@ -21,3 +21,13 @@ async def test_simulation_notification_is_idempotent(database):
     second = await notify_incident(database, incident, "firing", settings)
     assert first[0]["status"] == "sent"
     assert second[0]["status"] == "duplicate"
+
+
+def test_incident_reuses_logical_identity_when_external_fingerprint_changes(database):
+    service = IncidentService(database)
+    first = service.process_alert(make_alert(SCENARIO_BY_KEY["high-memory"]))
+    changed = make_alert(SCENARIO_BY_KEY["high-memory"])
+    changed.fingerprint = "different-source-fingerprint"
+    second = service.process_alert(changed)
+    assert second.id == first.id
+    assert first.logical_fingerprint

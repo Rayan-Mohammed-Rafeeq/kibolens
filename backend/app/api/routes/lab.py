@@ -20,6 +20,7 @@ router = APIRouter(prefix="/infrastructure/lab", tags=["failure-lab"])
 class LabStartRequest(BaseModel):
     physical: bool = False
     notify_test_recipients: bool = False
+    healthy: bool = False
 
 
 class LabScenarioResponse(BaseModel):
@@ -99,7 +100,7 @@ async def start_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, request
     physical_map = {"container-crash": "crasher", "container-restart-loop": "restart-loop", "container-unhealthy": "unhealthy", "application-config-failure": "config-error"}
     scenario = physical_map.get(scenario, scenario) if request.physical else scenario
     try:
-        return await DockerLabController(get_settings().docker_socket_path).start(scenario)
+        return await DockerLabController(get_settings().docker_socket_path).start(scenario, healthy=request.healthy)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -119,6 +120,17 @@ async def stop_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, db: Sess
     physical_map = {"container-crash": "crasher", "container-restart-loop": "restart-loop", "container-unhealthy": "unhealthy", "application-config-failure": "config-error"}
     try:
         return {"stopped": await DockerLabController(get_settings().docker_socket_path).stop(physical_map.get(scenario, scenario))}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/{scenario}/recover")
+async def recover_lab(scenario: str, user: CurrentUser, csrf: CsrfSession) -> dict:
+    _admin(user)
+    if scenario != "interview-demo":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only the interview demo supports controlled recovery.")
+    try:
+        return await DockerLabController(get_settings().docker_socket_path).start(scenario, healthy=True)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

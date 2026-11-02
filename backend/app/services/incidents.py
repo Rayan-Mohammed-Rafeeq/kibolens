@@ -20,6 +20,7 @@ from app.models.incident import (
 )
 from app.monitoring.service import MonitoringService
 from app.schemas.monitoring import AlertmanagerAlert
+from app.monitoring.alert_fingerprint import logical_alert_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class IncidentService:
         severity: IncidentSeverity,
         source: str = "alertmanager",
         alert_fingerprint: str | None = None,
+        logical_fingerprint: str | None = None,
         affected_host: str | None = None,
         affected_service: str | None = None,
         first_detected_at: datetime | None = None,
@@ -95,6 +97,7 @@ class IncidentService:
             status="DETECTED",
             source=source,
             alert_fingerprint=alert_fingerprint,
+            logical_fingerprint=logical_fingerprint,
             affected_host=affected_host,
             affected_service=affected_service,
             first_detected_at=first_detected,
@@ -113,6 +116,7 @@ class IncidentService:
             metadata={
                 "severity": severity,
                 "alert_fingerprint": alert_fingerprint,
+                "logical_fingerprint": logical_fingerprint,
                 "affected_service": affected_service,
             },
         )
@@ -402,7 +406,9 @@ class IncidentService:
         else:
             alert_source = "alertmanager"
 
-        # Extract alert information
+        # Extract alert information. The external fingerprint remains the
+        # exact source identity; the logical fingerprint correlates equivalent
+        # alerts whose source fingerprint changed during re-delivery.
         title = alert.annotations.get("summary", alert.labels.get("alertname", "Unknown Alert"))
         description = alert.annotations.get(
             "description", alert.annotations.get("message", "No description provided")
@@ -410,13 +416,21 @@ class IncidentService:
         severity = self._map_alert_severity(alert.labels.get("severity", "warning"))
         affected_service = alert.labels.get("job", alert.labels.get("service"))
         affected_host = alert.labels.get("instance", alert.labels.get("node"))
+        logical_fingerprint = logical_alert_fingerprint(
+            alert_source,
+            alert.labels.get("alertname", title),
+            affected_host or affected_service or "",
+        )
 
         # Find existing active incident with this fingerprint
         existing = self.db.execute(
             select(Incident)
             .where(
                 and_(
-                    Incident.alert_fingerprint == fingerprint,
+                    or_(
+                        Incident.alert_fingerprint == fingerprint,
+                        and_(logical_fingerprint is not None, Incident.logical_fingerprint == logical_fingerprint),
+                    ),
                     Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]),
                 )
             )
@@ -460,7 +474,10 @@ class IncidentService:
                     select(Incident)
                     .where(
                         and_(
-                            Incident.alert_fingerprint == fingerprint,
+                            or_(
+                                Incident.alert_fingerprint == fingerprint,
+                                and_(logical_fingerprint is not None, Incident.logical_fingerprint == logical_fingerprint),
+                            ),
                             Incident.status == "RESOLVED",
                         )
                     )
@@ -492,6 +509,7 @@ class IncidentService:
                         severity=severity,
                         source=alert_source,
                         alert_fingerprint=fingerprint,
+                        logical_fingerprint=logical_fingerprint,
                         affected_host=affected_host,
                         affected_service=affected_service,
                         first_detected_at=now,
@@ -533,6 +551,7 @@ class IncidentService:
                     severity=severity,
                     source=alert_source,
                     alert_fingerprint=fingerprint,
+                    logical_fingerprint=logical_fingerprint,
                     affected_host=affected_host,
                     affected_service=affected_service,
                     first_detected_at=now,

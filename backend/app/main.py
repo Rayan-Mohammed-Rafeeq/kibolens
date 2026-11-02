@@ -17,11 +17,12 @@ from app.services.incidents import IncidentService
 from app.schemas.monitoring import AlertmanagerAlert
 from app.models.incident import Incident
 from sqlalchemy import select
-from app.services.notifications import notify_incident
+from app.services.notifications import notify_incident, retry_failed_notifications
 
 # Global Qdrant service instance
 _qdrant_service = None
 _docker_task: asyncio.Task | None = None
+_notification_task: asyncio.Task | None = None
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +47,13 @@ async def _observe_container_events(settings) -> None:
                 recovery = event_status in {"start", "health_status: healthy"}
                 if not failure and not recovery:
                     continue
-                fingerprint = f"docker:{event_id}:health" if event_status.startswith("health_status") else f"docker:{event_id}:process"
+                scenario = labels.get("kibolens.lab.scenario")
+                fingerprint = (
+                    f"docker:lab:{scenario}"
+                    if is_lab and scenario
+                    else f"docker:{event_id}:health" if event_status.startswith("health_status")
+                    else f"docker:{event_id}:process"
+                )
                 db = SessionLocal()
                 try:
                     service = IncidentService(
@@ -76,12 +83,28 @@ async def _observe_container_events(settings) -> None:
                             },
                         )
                         incident = service.process_alert(alert)
+                        container_details = next(
+                            (
+                                item for item in await observer.list_containers()
+                                if item.get("id", "").lstrip("/").removeprefix("docker/") == event_id
+                            ),
+                            {},
+                        )
                         service.capture_evidence(
                             incident.id,
                             "CONTAINER_STATE",
                             source="docker",
                             resource_identifier=event.get("name") or event_id,
-                            metadata={"event": event_status, "exit_code": exit_code, "labels": labels, "simulated": False},
+                            metadata={
+                                "event": event_status,
+                                "exit_code": exit_code,
+                                "labels": labels,
+                                "simulated": False,
+                                "status": container_details.get("status"),
+                                "image": container_details.get("image"),
+                                "restart_count": container_details.get("restart_count"),
+                                "logs": container_details.get("logs"),
+                            },
                         )
                         await service.collect_incident_evidence(incident)
                         await notify_incident(db, incident, "firing", settings)
@@ -110,6 +133,21 @@ async def _observe_container_events(settings) -> None:
         await asyncio.sleep(15)
 
 
+async def _retry_notifications_loop(settings) -> None:
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                await retry_failed_notifications(db, settings)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Notification retry loop failed; retrying: %s", type(exc).__name__)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Application lifespan manager for startup and shutdown."""
@@ -119,9 +157,10 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     _qdrant_service = get_qdrant_service(settings)
 
-    global _docker_task
+    global _docker_task, _notification_task
     if settings.docker_observer_enabled:
         _docker_task = asyncio.create_task(_observe_container_events(settings))
+    _notification_task = asyncio.create_task(_retry_notifications_loop(settings))
 
     # Pre-warm the AI router singleton (validates configuration)
     if settings.llm_provider.lower() == "cloud":
@@ -152,6 +191,9 @@ async def lifespan(_: FastAPI):
     if _docker_task:
         _docker_task.cancel()
         await asyncio.gather(_docker_task, return_exceptions=True)
+    if _notification_task:
+        _notification_task.cancel()
+        await asyncio.gather(_notification_task, return_exceptions=True)
 
     # Reset AI router singleton
     try:

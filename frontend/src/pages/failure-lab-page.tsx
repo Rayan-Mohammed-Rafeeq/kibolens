@@ -12,6 +12,7 @@ export function FailureLabPage() {
   const [notifyDemo, setNotifyDemo] = useState(false);
   const start = useMutation({ mutationFn: ({ scenario, physical: usePhysical }: { scenario: LabScenario; physical: boolean }) => labService.start(scenario, usePhysical, notifyDemo), onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
   const stop = useMutation({ mutationFn: labService.stop, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
+  const recover = useMutation({ mutationFn: labService.recover, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
   const reset = useMutation({ mutationFn: labService.reset, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
   const active = new Map((status.data ?? []).map((item) => [item.labels?.["kibolens.scenario"] ?? item.labels?.["kibolens.lab.scenario"] ?? item.name.replace("kibolens-lab-", ""), item]));
 
@@ -38,6 +39,7 @@ export function FailureLabPage() {
             <div className="flex gap-2">
               <button aria-label={`Start ${scenario}`} onClick={() => start.mutate({ scenario, physical: usePhysical })} disabled={Boolean(item) || start.isPending} className="rounded-md bg-cyan-400 p-2 text-zinc-950 disabled:opacity-40"><Play size={15} /></button>
               <button aria-label={`Stop ${scenario}`} onClick={() => stop.mutate(scenario)} disabled={!item || stop.isPending} className="rounded-md border border-zinc-700 p-2 text-zinc-300 disabled:opacity-40"><Square size={15} /></button>
+              {scenario === "interview-demo" && <button aria-label="Recover interview demo" onClick={() => recover.mutate()} disabled={recover.isPending} className="rounded-md border border-emerald-400/40 px-2 text-xs text-emerald-300 disabled:opacity-40">Recover</button>}
             </div>
           </div>
           {item?.incident_id && <a className="mt-3 inline-block text-xs text-cyan-300 hover:text-cyan-200" href={`/incidents/${item.incident_id}`}>Open simulated incident →</a>}

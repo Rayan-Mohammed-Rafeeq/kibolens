@@ -25,6 +25,32 @@ class DockerObserver:
             return None
         return docker.DockerClient(base_url=f"unix://{self.socket_path}")
 
+    @staticmethod
+    def _direct_stats(container) -> dict:
+        """Read bounded CPU/memory stats when cAdvisor is unavailable."""
+        if not container.status == "running":
+            return {}
+        try:
+            stats = container.stats(stream=False)
+            cpu = stats.get("cpu_stats", {})
+            previous_cpu = stats.get("precpu_stats", {})
+            cpu_delta = cpu.get("cpu_usage", {}).get("total_usage", 0) - previous_cpu.get("cpu_usage", {}).get("total_usage", 0)
+            system_delta = cpu.get("system_cpu_usage", 0) - previous_cpu.get("system_cpu_usage", 0)
+            online_cpus = cpu.get("online_cpus") or len(cpu.get("cpu_usage", {}).get("percpu_usage") or []) or 1
+            cpu_percent = (cpu_delta / system_delta) * online_cpus * 100 if system_delta > 0 and cpu_delta >= 0 else None
+            memory_stats = stats.get("memory_stats", {})
+            raw_memory = memory_stats.get("usage")
+            cache = (memory_stats.get("stats") or {}).get("inactive_file") or (memory_stats.get("stats") or {}).get("cache") or 0
+            memory_limit = memory_stats.get("limit")
+            return {
+                "cpu_percent": cpu_percent,
+                "memory_bytes": max(0, raw_memory - cache) if raw_memory is not None else None,
+                "memory_limit_bytes": memory_limit,
+            }
+        except Exception as exc:
+            logger.debug("Could not collect direct Docker stats: %s", exc)
+            return {}
+
     def _list_sync(self) -> list[dict]:
         client = self._client()
         if client is None:
@@ -66,6 +92,7 @@ class DockerObserver:
                     "error": state.get("Error") or None,
                     "last_observation": observed_at,
                     "logs": self._logs_sync(container),
+                    **self._direct_stats(container),
                 })
             return output
         finally:
@@ -170,10 +197,10 @@ class DockerLabController(DockerObserver):
 
     SCENARIOS = frozenset({
         "crasher", "unhealthy", "restart-loop", "cpu-stress", "memory-pressure",
-        "missing-dependency", "config-error",
+        "missing-dependency", "config-error", "interview-demo",
     })
 
-    def _start_sync(self, scenario: str) -> dict:
+    def _start_sync(self, scenario: str, healthy: bool = False) -> dict:
         if scenario not in self.SCENARIOS:
             raise ValueError("Unsupported Failure Lab scenario.")
         client = self._client()
@@ -183,7 +210,7 @@ class DockerLabController(DockerObserver):
         try:
             existing = client.containers.list(all=True, filters={"name": f"^{name}$"})
             for container in existing:
-                if container.status == "running":
+                if container.status == "running" and not healthy:
                     return {"name": name, "status": "running"}
                 container.remove(force=True)
             try:
@@ -195,6 +222,7 @@ class DockerLabController(DockerObserver):
                     internal=True,
                     labels={"kibolens.lab": "true"},
                 )
+            environment = {"DEMO_MODE": "healthy" if healthy else "failing"} if scenario == "interview-demo" else None
             container = client.containers.run(
                 image=f"kibolens/lab-{scenario}:latest",
                 name=name,
@@ -209,13 +237,14 @@ class DockerLabController(DockerObserver):
                 labels={"kibolens.lab": "true", "kibolens.lab.scenario": scenario},
                 network=network.name,
                 restart_policy={"Name": "no"},
+                environment=environment,
             )
-            return {"name": name, "id": container.id, "status": "created"}
+            return {"name": name, "id": container.id, "status": "healthy" if healthy else "created"}
         finally:
             client.close()
 
-    async def start(self, scenario: str) -> dict:
-        return await asyncio.to_thread(self._start_sync, scenario)
+    async def start(self, scenario: str, healthy: bool = False) -> dict:
+        return await asyncio.to_thread(self._start_sync, scenario, healthy)
 
     def _stop_sync(self, scenario: str) -> bool:
         if scenario not in self.SCENARIOS:

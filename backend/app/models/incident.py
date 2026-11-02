@@ -73,6 +73,7 @@ class Incident(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="alertmanager")
     alert_fingerprint: Mapped[str | None] = mapped_column(String(256), index=True)
+    logical_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
     affected_host: Mapped[str | None] = mapped_column(String(256))
     affected_service: Mapped[str | None] = mapped_column(String(256), index=True)
     first_detected_at: Mapped[datetime] = mapped_column(
@@ -101,6 +102,7 @@ class Incident(Base):
         ),
         Index("ix_incidents_status_severity", "status", "severity"),
         Index("ix_incidents_fingerprint_status", "alert_fingerprint", "status"),
+        Index("ix_incidents_logical_fingerprint_status", "logical_fingerprint", "status"),
     )
 
 

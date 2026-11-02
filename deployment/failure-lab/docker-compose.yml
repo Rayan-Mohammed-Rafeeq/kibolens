@@ -14,6 +14,35 @@ networks:
       kibolens.lab.description: "Isolated failure lab network - no external or production access"
 
 services:
+  # Dedicated interview workflow: fails once with a real exit code and can be
+  # recreated healthy through the administrator Recovery action.
+  lab-interview-demo:
+    build:
+      context: ./scenarios
+      dockerfile: interview-demo.Dockerfile
+    image: kibolens/lab-interview-demo:latest
+    container_name: kibolens-lab-interview-demo
+    profiles: [lab]
+    networks: [lab]
+    environment:
+      DEMO_MODE: "failing"
+      FAIL_DELAY_SECONDS: "2"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+          pids: 10
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "interview-demo"
+      kibolens.lab.description: "Dedicated safe interview failure and recovery scenario"
+
   # Scenario 1: Immediate Crash
   lab-crasher:
     build:
