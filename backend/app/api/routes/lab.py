@@ -14,11 +14,39 @@ from app.services.incidents import IncidentService
 router = APIRouter(prefix="/infrastructure/lab", tags=["failure-lab"])
 
 
+def _admin(user: CurrentUser) -> None:
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required.")
+
+
+@router.get("")
+async def lab_status(user: CurrentUser) -> list[dict]:
+    _admin(user)
+    return await DockerLabController(get_settings().docker_socket_path).lab_containers()
+
+
+@router.post("/{scenario}/start")
+async def start_lab(scenario: str, user: CurrentUser, csrf: CsrfSession) -> dict:
+    _admin(user)
+    try:
+        return await DockerLabController(get_settings().docker_socket_path).start(scenario)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/{scenario}/stop")
+async def stop_lab(scenario: str, user: CurrentUser, csrf: CsrfSession) -> dict[str, bool]:
+    _admin(user)
+    try:
+        return {"stopped": await DockerLabController(get_settings().docker_socket_path).stop(scenario)}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/reset")
 async def reset_lab(user: CurrentUser, csrf: CsrfSession, db: Session = Depends(get_db)) -> dict[str, int | str]:
     """Remove only containers explicitly labeled as KiboLens lab resources."""
-    if user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required.")
+    _admin(user)
     settings = get_settings()
     removed = await DockerLabController(settings.docker_socket_path).reset()
     service = IncidentService(db)

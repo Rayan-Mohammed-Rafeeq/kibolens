@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.ai.cloud_embeddings import CloudEmbeddingService
 from app.ai.investigator import get_investigator
-from app.api.dependencies import require_session
+from app.api.dependencies import DatabaseSession, require_session
 from app.core.config import get_settings, Settings
 from app.models.session import UserSession
 from app.monitoring.prometheus import PrometheusClient
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @router.post("", response_model=InvestigationResponse)
 async def investigate_issue(
     request: InvestigationRequest,
+    database: DatabaseSession,
     session: UserSession = Depends(require_session),
     settings: Settings = Depends(get_settings),
 ):
@@ -54,6 +55,7 @@ async def investigate_issue(
             document_service=document_service,
             incident_service=None,  # The general question endpoint has no incident identifier.
             prometheus_client=prometheus_client,
+            database=database,
         )
 
         # Run investigation

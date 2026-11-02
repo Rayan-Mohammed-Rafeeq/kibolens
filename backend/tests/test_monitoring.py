@@ -360,3 +360,40 @@ async def test_container_metrics_preserved_after_deduplication() -> None:
     assert container.network_transmit_bytes_per_second == 2097152
     assert container.last_observation is not None
     assert container.availability == "available"
+
+
+@pytest.mark.anyio
+async def test_docker_inventory_is_merged_with_cadvisor_metrics() -> None:
+    """Docker lifecycle metadata must not replace cAdvisor resource telemetry."""
+
+    class FakeClient:
+        async def instant_query(self, query: str):
+            timestamp = datetime.now(UTC).timestamp()
+            if "container_last_seen" in query:
+                return [{"metric": {"id": "/docker/abc123", "name": "/api"}, "value": [timestamp, "1"]}]
+            if "container_cpu_usage" in query:
+                return [{"metric": {"id": "/docker/abc123"}, "value": [timestamp, "0.25"]}]
+            if "container_memory" in query:
+                return [{"metric": {"id": "/docker/abc123"}, "value": [timestamp, "104857600"]}]
+            if "network_receive" in query:
+                return [{"metric": {"id": "/docker/abc123"}, "value": [timestamp, "1200"]}]
+            if "network_transmit" in query:
+                return [{"metric": {"id": "/docker/abc123"}, "value": [timestamp, "800"]}]
+            return []
+
+    class FakeObserver:
+        async def list_containers(self):
+            return [{
+                "id": "abc123", "name": "api", "status": "RUNNING",
+                "restart_count": 2, "last_observation": datetime.now(UTC),
+                "image": "api:latest", "labels": {"com.docker.compose.service": "api"},
+                "exit_code": 0, "logs": "ready",
+            }]
+
+    containers = await MonitoringService(FakeClient(), Settings(), FakeObserver()).containers()
+    assert len(containers) == 1
+    assert containers[0].status == "RUNNING"
+    assert containers[0].cpu_percent == 0.25
+    assert containers[0].memory_bytes == 104857600
+    assert containers[0].network_receive_bytes_per_second == 1200
+    assert containers[0].restart_count == 2

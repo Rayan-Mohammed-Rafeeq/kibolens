@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.services.qdrant import get_qdrant_service
 import asyncio
 import logging
+import time
 from app.database.session import SessionLocal
 from app.monitoring.docker_observer import DockerObserver
 from app.monitoring.prometheus import PrometheusClient
@@ -25,12 +26,31 @@ async def _observe_lab_failures(settings) -> None:
     """Poll retained Docker state and correlate lab failures with incidents."""
     observer = DockerObserver(settings.docker_socket_path)
     active: set[str] = set()
+    event_cursor = time.time() - 15
     while True:
         try:
+            now = time.time()
+            lifecycle_events = await observer.events_since(event_cursor, now)
+            event_cursor = now
             lab_containers = await observer.lab_containers()
             failures = [item for item in lab_containers if item["status"] == "UNHEALTHY" or (
                 item["status"] == "STOPPED" and item.get("exit_code", 0) != 0
             ) or (item.get("restart_count") or 0) > 0]
+            known_ids = {item.get("id", "").lstrip("/").removeprefix("docker/") for item in lab_containers}
+            for event in lifecycle_events:
+                event_id = (event.get("id") or "").lstrip("/").removeprefix("docker/")
+                if event.get("status") in {"die", "kill", "health_status: unhealthy"} and event_id and event_id not in known_ids:
+                    failures.append({
+                        "id": event_id,
+                        "name": event.get("name") or event_id[:12],
+                        "status": "STOPPED" if event.get("status") != "health_status: unhealthy" else "UNHEALTHY",
+                        "restart_count": 0,
+                        "exit_code": int(event.get("exit_code") or 1),
+                        "last_observation": None,
+                        "image": None,
+                        "labels": event.get("labels", {}),
+                        "logs": f"Docker lifecycle event: {event.get('status')}",
+                    })
             current = {item["id"] for item in failures}
             db = SessionLocal()
             try:

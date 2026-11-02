@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Mail, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Mail } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/auth-context";
@@ -100,9 +100,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900/60 p-7 shadow-2xl">
         {/* Header */}
         <div className="mb-7">
-          <div className="mb-4 inline-flex rounded-lg bg-cyan-400/15 p-2 text-cyan-300">
-            <ShieldCheck />
-          </div>
+          <img src="/brand/kibolens-wordmark.svg" alt="KiboLens" className="mb-5 h-12 w-auto" />
           <h1 className="text-2xl font-semibold">
             {stage === "credentials" ? "Welcome to KiboLens" : "Verify your identity"}
           </h1>

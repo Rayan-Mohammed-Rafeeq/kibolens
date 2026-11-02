@@ -4,6 +4,27 @@ KiboLens is an evidence-first SRE workspace combining Prometheus, Alertmanager,
 PostgreSQL incident history, Qdrant retrieval, and free-only cloud AI routing:
 Gemini, then Groq, then OpenRouter.
 
+## Architecture
+
+```text
+React/Vite -> FastAPI session + CSRF -> PostgreSQL
+                         |             |
+                         v             v
+                 LangGraph workflow  durable checkpoints
+                         |
+       LangChain prompt + CloudRouterChatModel
+                         |
+             Gemini -> Groq -> OpenRouter :free
+                         |
+          Prometheus / Docker observer / Qdrant
+```
+
+The LangChain model adapter delegates every generation to the centralized
+KiboLens router. The LangGraph workflow classifies the question, conditionally
+selects incident, metric and document evidence, constructs a grounded prompt,
+validates empty output, and records execution metadata. Checkpoint snapshots
+are scoped by authenticated owner and conversation.
+
 ## Demonstration
 
 Use a suitable non-production host for the lab scenarios:
@@ -26,6 +47,10 @@ docker compose -f deployment/failure-lab/docker-compose.yml --profile lab up -d 
 docker compose -f deployment/failure-lab/docker-compose.yml --profile lab ps
 docker compose -f deployment/failure-lab/docker-compose.yml --profile lab logs lab-crasher
 ```
+
+The authenticated Failure Lab page also provides allowlisted start, stop and
+reset controls. The backend controller accepts only known scenarios and labels
+all created resources with `kibolens.lab=true`.
 
 Open Incidents, inspect Docker evidence and logs, then choose **Investigate**.
 The linked conversation contains incident context, telemetry and retrieved
@@ -55,6 +80,8 @@ The endpoint requires the session cookie and CSRF token.
   never executed automatically.
 - Qdrant uses one configured embedding model and dimension. Ingestion rejects
   incompatible vectors and redacts secret-like configuration lines.
+- The brand mark and favicon are production SVG assets in
+  `frontend/public/brand/` and `frontend/public/favicon.svg`.
 - Docker observation requires the Docker Python package and a read-only Engine
   socket. Cloud AI and alert delivery require configured external credentials.
 - VM support currently means standard Node Exporter telemetry, not automatic

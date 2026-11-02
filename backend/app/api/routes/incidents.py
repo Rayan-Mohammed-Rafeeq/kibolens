@@ -185,13 +185,17 @@ async def investigate_incident(
         document_service=DocumentService(get_qdrant_service(settings), CloudEmbeddingService(settings)),
         incident_service=service,
         prometheus_client=PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
+        database=db,
     )
     result = await investigator.investigate(
         question=payload.content,
         user_id=user.id,
         conversation_context=context,
+        conversation_id=conversation.id,
     )
     assistant_content = result.get("findings") or f"Investigation could not be completed: {result.get('error', 'No provider response was available.')}"
+    if result.get("findings") and result.get("data_sources"):
+        assistant_content += "\n\n---\n**Sources consulted:** " + ", ".join(result["data_sources"])
     conversations.add_assistant_message(db, conversation, assistant_content)
     service.add_note(incident.id, f"AI investigation conversation created: {conversation.id}", source="ai")
     db.commit()

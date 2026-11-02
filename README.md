@@ -18,8 +18,8 @@ Knowledge Base and Settings are authenticated, functional application pages. See
 
 1. Copy `.env.example` to `.env`, replacing `POSTGRES_PASSWORD`, `KIBOLENS_SESSION_HASH_SECRET`, and the placeholder database password in `KIBOLENS_DATABASE_URL`.
 2. Install Docker Engine and Docker Compose on the intended host.
-3. Run `docker compose -f deployment/docker-compose.yml up --build`.
-4. In a second terminal, run `docker compose -f deployment/docker-compose.yml exec backend alembic upgrade head`.
+3. Run `docker compose --env-file .env -f deployment/docker-compose.yml up --build`.
+4. In a second terminal, run `docker compose --env-file .env -f deployment/docker-compose.yml exec backend alembic upgrade head`.
 5. Create the only administrator interactively: `docker compose -f deployment/docker-compose.yml exec backend python -m app.cli.bootstrap_admin`.
 6. Open `http://localhost:8080`. The bind address is loopback-only by default.
 

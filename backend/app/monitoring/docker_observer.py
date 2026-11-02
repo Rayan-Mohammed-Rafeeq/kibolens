@@ -74,6 +74,41 @@ class DockerObserver:
             logger.warning("Docker observer unavailable: %s", exc)
             return []
 
+    def _events_sync(self, since: float, until: float) -> list[dict]:
+        client = self._client()
+        if client is None:
+            return []
+        try:
+            events = client.events(
+                decode=True,
+                filters={"type": ["container"], "label": ["kibolens.lab=true"]},
+                since=since,
+                until=until,
+            )
+            output = []
+            for event in events:
+                actor = event.get("Actor", {})
+                attributes = actor.get("Attributes", {})
+                if attributes.get("kibolens.lab") != "true":
+                    continue
+                output.append({
+                    "id": actor.get("ID"),
+                    "status": event.get("status"),
+                    "time": event.get("time"),
+                    "name": attributes.get("name") or attributes.get("com.docker.compose.service"),
+                    "exit_code": attributes.get("exitCode"),
+                    "labels": {key: value for key, value in attributes.items() if key.startswith("kibolens.")},
+                })
+            return output
+        except Exception as exc:
+            logger.warning("Docker event stream unavailable: %s", exc)
+            return []
+        finally:
+            client.close()
+
+    async def events_since(self, since: float, until: float) -> list[dict]:
+        return await asyncio.to_thread(self._events_sync, since, until)
+
     async def lab_failures(self) -> list[dict]:
         """Return only qualifying lab failures for incident correlation."""
         containers = await self.list_containers()
@@ -110,9 +145,82 @@ class DockerLabController(DockerObserver):
                     continue
                 container.remove(force=True)
                 removed += 1
+            try:
+                network = client.networks.get("kibolens-lab")
+                if network.attrs.get("Labels", {}).get("kibolens.lab") == "true":
+                    network.remove()
+            except Exception:
+                pass
             return removed
         finally:
             client.close()
 
     async def reset(self) -> int:
         return await asyncio.to_thread(self._reset_sync)
+
+    SCENARIOS = frozenset({
+        "crasher", "unhealthy", "restart-loop", "cpu-stress", "memory-pressure",
+        "missing-dependency", "config-error",
+    })
+
+    def _start_sync(self, scenario: str) -> dict:
+        if scenario not in self.SCENARIOS:
+            raise ValueError("Unsupported Failure Lab scenario.")
+        client = self._client()
+        if client is None:
+            raise RuntimeError("Docker SDK is unavailable.")
+        name = f"kibolens-lab-{scenario}"
+        try:
+            existing = client.containers.list(all=True, filters={"name": f"^{name}$"})
+            for container in existing:
+                if container.status == "running":
+                    return {"name": name, "status": "running"}
+                container.remove(force=True)
+            try:
+                network = client.networks.get("kibolens-lab")
+            except Exception:
+                network = client.networks.create(
+                    "kibolens-lab",
+                    driver="bridge",
+                    internal=True,
+                    labels={"kibolens.lab": "true"},
+                )
+            container = client.containers.run(
+                image=f"kibolens/lab-{scenario}:latest",
+                name=name,
+                detach=True,
+                user="1001:1001",
+                read_only=True,
+                cap_drop=["ALL"],
+                security_opt=["no-new-privileges:true"],
+                mem_limit="64m",
+                nano_cpus=500_000_000,
+                pids_limit=20,
+                labels={"kibolens.lab": "true", "kibolens.lab.scenario": scenario},
+                network=network.name,
+                restart_policy={"Name": "no"},
+            )
+            return {"name": name, "id": container.id, "status": "created"}
+        finally:
+            client.close()
+
+    async def start(self, scenario: str) -> dict:
+        return await asyncio.to_thread(self._start_sync, scenario)
+
+    def _stop_sync(self, scenario: str) -> bool:
+        if scenario not in self.SCENARIOS:
+            raise ValueError("Unsupported Failure Lab scenario.")
+        client = self._client()
+        if client is None:
+            raise RuntimeError("Docker SDK is unavailable.")
+        try:
+            name = f"kibolens-lab-{scenario}"
+            matches = client.containers.list(all=True, filters={"name": f"^{name}$"})
+            for container in matches:
+                container.stop(timeout=5)
+            return bool(matches)
+        finally:
+            client.close()
+
+    async def stop(self, scenario: str) -> bool:
+        return await asyncio.to_thread(self._stop_sync, scenario)

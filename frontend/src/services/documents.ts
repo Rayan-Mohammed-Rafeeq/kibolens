@@ -1,4 +1,4 @@
-import { apiRequest } from "./http";
+import { apiRequest, getCsrfToken } from "./http";
 
 export interface DocumentItem {
   document_id: string;
@@ -29,6 +29,7 @@ export const documentsService = {
       method: "POST",
       body: (() => { const form = new FormData(); form.append("file", file); return form; })(),
       credentials: "include",
+      headers: getCsrfToken() ? { "X-CSRF-Token": getCsrfToken()! } : {},
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { detail?: string } | null;

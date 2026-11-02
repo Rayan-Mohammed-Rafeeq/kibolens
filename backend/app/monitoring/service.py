@@ -113,122 +113,81 @@ class MonitoringService:
             return MetricHistory(metric=metric, unit=unit, points=[], availability="unavailable")
 
     async def containers(self) -> list[ContainerStatus]:
-        """
-        Retrieve container inventory from cAdvisor metrics.
-        
-        Deduplicates containers by ID to handle multiple time series with different
-        name labels for the same container (e.g., Docker Compose service names vs
-        runtime names).
-        
-        Note: Status remains UNKNOWN as cAdvisor does not expose Docker health-check
-        status. Only resource metrics (CPU, memory, network) are available.
-        """
-        if self.docker_observer:
-            docker_containers = await self.docker_observer.list_containers()
-            if docker_containers:
-                return [ContainerStatus(
-                    id=item["id"], name=item["name"], status=item["status"],
-                    cpu_percent=None, memory_bytes=None,
-                    network_receive_bytes_per_second=None,
-                    network_transmit_bytes_per_second=None,
-                    restart_count=item.get("restart_count"),
-                    last_observation=item.get("last_observation"),
-                    availability="available" if item.get("last_observation") else "unavailable",
-                    image=item.get("image"), exit_code=item.get("exit_code"),
-                    labels=item.get("labels", {}), logs=item.get("logs"),
-                ) for item in docker_containers]
-
         try:
-            # Query all container time series, preserving both id and name for deduplication
-            results = await self.client.instant_query(
-                'container_last_seen{name!="",image!="",id!=""}'
-            )
+            results = await self.client.instant_query('container_last_seen{id!=""}')
         except PrometheusError:
-            return []
-        
-        # Group by container ID to deduplicate, keeping one representative name per container
-        containers_by_id = {}
+            results = []
+
+        containers_by_id: dict[str, dict] = {}
         for result in results:
-            labels = result.get("metric", {})
-            value = result.get("value")
+            labels, value = result.get("metric", {}), result.get("value")
             if not isinstance(labels, dict) or not isinstance(value, list):
                 continue
-            
             try:
                 observed_at, _ = parse_sample(value)
             except PrometheusMalformedResponse:
                 continue
-            
-            # Container ID is the stable unique identifier
-            container_id = labels.get("id")
-            if not isinstance(container_id, str) or not container_id:
+            container_id = self._normalize_container_id(labels.get("id"))
+            if not container_id:
                 continue
-            
-            # Get name and normalize (remove leading slash)
             raw_name = labels.get("name")
-            if isinstance(raw_name, str) and raw_name:
-                normalized_name = raw_name.lstrip("/")
-            else:
-                # Fallback to short container ID if no name
-                normalized_name = container_id[:12]
-            
-            # Keep the first occurrence or prefer names without underscores (Compose style)
-            if container_id not in containers_by_id:
+            normalized_name = raw_name.lstrip("/") if isinstance(raw_name, str) and raw_name else container_id[:12]
+            current = containers_by_id.get(container_id)
+            if current is None or ("_" in current["name"] and "_" not in normalized_name):
                 containers_by_id[container_id] = {
-                    "id": container_id,
-                    "name": normalized_name,
-                    "observed_at": observed_at,
+                    "id": container_id, "name": normalized_name, "observed_at": observed_at
                 }
-            elif "_" not in normalized_name and "_" in containers_by_id[container_id]["name"]:
-                # Prefer Compose service names (kibolens-grafana-1) over runtime names
-                # (kibolens_grafana_1)
-                containers_by_id[container_id]["name"] = normalized_name
-        
+
+        docker_by_id: dict[str, dict] = {}
+        if self.docker_observer:
+            for item in await self.docker_observer.list_containers():
+                container_id = self._normalize_container_id(item.get("id"))
+                if not container_id:
+                    continue
+                docker_by_id[container_id] = item
+                containers_by_id.setdefault(container_id, {
+                    "id": container_id,
+                    "name": item.get("name") or container_id[:12],
+                    "observed_at": item.get("last_observation"),
+                })
+
         if not containers_by_id:
             return []
-        
-        # Fetch resource metrics using container IDs for stable lookups
+
         metric_queries = {
-            "cpu_percent": (
-                'sum by (id) (rate(container_cpu_usage_seconds_total{image!="",id!=""}[5m])) '
-                "* 100"
-            ),
-            "memory_bytes": (
-                'sum by (id) (container_memory_working_set_bytes{image!="",id!=""})'
-            ),
-            "network_receive_bytes_per_second": (
-                'sum by (id) (rate(container_network_receive_bytes_total{image!="",id!=""}[5m]))'
-            ),
-            "network_transmit_bytes_per_second": (
-                'sum by (id) (rate(container_network_transmit_bytes_total{image!="",id!=""}[5m]))'
-            ),
+            "cpu_percent": 'sum by (id) (rate(container_cpu_usage_seconds_total{image!="",id!=""}[5m])) * 100',
+            "memory_bytes": 'sum by (id) (container_memory_working_set_bytes{image!="",id!=""} or container_memory_usage_bytes{image!="",id!=""})',
+            "network_receive_bytes_per_second": 'sum by (id) (rate(container_network_receive_bytes_total{image!="",id!=""}[5m]))',
+            "network_transmit_bytes_per_second": 'sum by (id) (rate(container_network_transmit_bytes_total{image!="",id!=""}[5m]))',
         }
-        query_results = await asyncio.gather(
-            *(self._container_metric(query) for query in metric_queries.values())
-        )
+        query_results = await asyncio.gather(*(self._container_metric(query) for query in metric_queries.values()))
         measurements = dict(zip(metric_queries, query_results, strict=True))
-        
-        # Build final container list with metrics
-        containers = []
+        output = []
         for container_id, container_data in containers_by_id.items():
-            containers.append(
-                ContainerStatus(
-                    id=container_id,
-                    name=container_data["name"],
-                    status="UNKNOWN",  # cAdvisor doesn't expose Docker health-check status
-                    cpu_percent=measurements["cpu_percent"].get(container_id),
-                    memory_bytes=measurements["memory_bytes"].get(container_id),
-                    network_receive_bytes_per_second=measurements[
-                        "network_receive_bytes_per_second"
-                    ].get(container_id),
-                    network_transmit_bytes_per_second=measurements[
-                        "network_transmit_bytes_per_second"
-                    ].get(container_id),
-                    last_observation=container_data["observed_at"],
-                    availability=self._availability(container_data["observed_at"]),
-                )
-            )
-        return containers
+            docker_data = docker_by_id.get(container_id, {})
+            observed_at = container_data["observed_at"]
+            output.append(ContainerStatus(
+                id=container_id,
+                name=docker_data.get("name") or container_data["name"],
+                status=docker_data.get("status", "UNKNOWN"),
+                cpu_percent=measurements["cpu_percent"].get(container_id),
+                memory_bytes=measurements["memory_bytes"].get(container_id),
+                network_receive_bytes_per_second=measurements["network_receive_bytes_per_second"].get(container_id),
+                network_transmit_bytes_per_second=measurements["network_transmit_bytes_per_second"].get(container_id),
+                restart_count=docker_data.get("restart_count"),
+                last_observation=observed_at,
+                availability=self._availability(observed_at) if observed_at else "unavailable",
+                image=docker_data.get("image"), exit_code=docker_data.get("exit_code"),
+                labels=docker_data.get("labels", {}), logs=docker_data.get("logs"),
+            ))
+        return output
+
+    @staticmethod
+    def _normalize_container_id(value: object) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        value = value.strip().lstrip("/")
+        return value.removeprefix("docker/") or None
 
     async def _container_metric(self, query: str) -> dict[str, float]:
         """
@@ -246,8 +205,8 @@ class MonitoringService:
             if not isinstance(labels, dict) or not isinstance(sample, list):
                 continue
             # Use container ID for stable lookups (not name, which can vary)
-            container_id = labels.get("id")
-            if not isinstance(container_id, str) or not container_id:
+            container_id = self._normalize_container_id(labels.get("id"))
+            if not container_id:
                 continue
             try:
                 _, value = parse_sample(sample)

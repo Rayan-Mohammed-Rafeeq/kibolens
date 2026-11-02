@@ -14,24 +14,31 @@ The investigation response now includes provider/model routing metadata.
 from __future__ import annotations
 
 import logging
+import json
 from datetime import datetime, timedelta
 from datetime import timezone as tz
 from typing import Annotated, Literal, TypedDict
 from uuid import UUID
+from sqlalchemy.orm import Session
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
 
 from app.ai.router.core import AIRouter, get_ai_router
+from app.ai.langchain_router import CloudRouterChatModel
 from app.ai.router.types import RoutingResult
 from app.core.config import Settings
 from app.monitoring.prometheus import PrometheusClient
 from app.services.documents import DocumentService
 from app.services.incidents import IncidentService
+from app.models.investigation_checkpoint import InvestigationCheckpoint
 
 UTC = tz.utc
+_CHECKPOINTER = MemorySaver()
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,9 @@ class InvestigationState(TypedDict):
     routing_metadata: dict | None
     user_id: UUID | None
     conversation_context: str | None
+    intent: str
+    requested_sources: list[str]
+    execution: dict
 
 
 class InvestigationFindings(BaseModel):
@@ -92,37 +102,85 @@ class CloudAIInvestigator:
         document_service: DocumentService | None = None,
         incident_service: IncidentService | None = None,
         prometheus_client: PrometheusClient | None = None,
+        database: Session | None = None,
     ):
         self.settings = settings
         self._router = router
         self.document_service = document_service
         self.incident_service = incident_service
         self.prometheus_client = prometheus_client
+        self.database = database
+        self._langchain_model = CloudRouterChatModel(
+            router=router,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+        )
         self.graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph investigation workflow."""
         workflow = StateGraph(InvestigationState)
 
+        workflow.add_node("classify_request", self._classify_request)
         workflow.add_node("gather_incident_context", self._gather_incident_context)
         workflow.add_node("gather_metrics", self._gather_metrics)
         workflow.add_node("gather_documents", self._gather_documents)
         workflow.add_node("analyze_and_conclude", self._analyze_and_conclude)
 
-        workflow.set_entry_point("gather_incident_context")
+        workflow.set_entry_point("classify_request")
+        workflow.add_conditional_edges(
+            "classify_request",
+            self._first_evidence_node,
+            {
+                "gather_incident_context": "gather_incident_context",
+                "gather_metrics": "gather_metrics",
+                "gather_documents": "gather_documents",
+                "analyze_and_conclude": "analyze_and_conclude",
+            },
+        )
         workflow.add_edge("gather_incident_context", "gather_metrics")
         workflow.add_edge("gather_metrics", "gather_documents")
         workflow.add_edge("gather_documents", "analyze_and_conclude")
         workflow.add_edge("analyze_and_conclude", END)
 
-        return workflow.compile()
+        return workflow.compile(checkpointer=_CHECKPOINTER)
+
+    async def _classify_request(self, state: InvestigationState) -> InvestigationState:
+        question = state["question"].lower()
+        sources: list[str] = []
+        if any(word in question for word in ("incident", "alert", "failure", "restart", "unhealthy", "crash")):
+            sources.append("incident")
+        if any(word in question for word in ("cpu", "memory", "ram", "disk", "network", "load", "metric", "yesterday")):
+            sources.append("metrics")
+        if any(word in question for word in ("docker", "container", "compose", "dockerfile", "log", "dependency", "config", "runbook", "document")):
+            sources.append("documents")
+        state["requested_sources"] = sources
+        state["intent"] = "infrastructure_investigation" if sources else "general_sre_question"
+        state["execution"] = {"nodes": [], "retrieval_counts": {}, "started_at": datetime.now(UTC).isoformat()}
+        return state
+
+    @staticmethod
+    def _first_evidence_node(state: InvestigationState) -> str:
+        requested = state.get("requested_sources", [])
+        if "incident" in requested:
+            return "gather_incident_context"
+        if "metrics" in requested:
+            return "gather_metrics"
+        if "documents" in requested:
+            return "gather_documents"
+        return "analyze_and_conclude"
+
+    @staticmethod
+    def _record_node(state: InvestigationState, name: str) -> None:
+        state.setdefault("execution", {}).setdefault("nodes", []).append(name)
 
     # ─── Context-gathering nodes (semantics preserved from original) ──────────
 
     async def _gather_incident_context(
         self, state: InvestigationState
     ) -> InvestigationState:
-        if not self.incident_service:
+        self._record_node(state, "gather_incident_context")
+        if "incident" not in state.get("requested_sources", []) or not self.incident_service:
             state["incident_context"] = None
             return state
         try:
@@ -136,6 +194,10 @@ class CloudAIInvestigator:
         return state
 
     async def _gather_metrics(self, state: InvestigationState) -> InvestigationState:
+        self._record_node(state, "gather_metrics")
+        if "metrics" not in state.get("requested_sources", []):
+            state["metrics_data"] = None
+            return state
         if not self.prometheus_client:
             state["metrics_data"] = None
             return state
@@ -194,6 +256,7 @@ class CloudAIInvestigator:
 
             if queries_executed:
                 state["metrics_data"] = "\n".join(metrics_parts)
+                state["execution"]["retrieval_counts"]["metrics"] = len(queries_executed)
                 logger.info("Gathered metrics: %s", ", ".join(queries_executed))
             else:
                 state["metrics_data"] = "No specific metrics queries matched the question."
@@ -205,6 +268,10 @@ class CloudAIInvestigator:
         return state
 
     async def _gather_documents(self, state: InvestigationState) -> InvestigationState:
+        self._record_node(state, "gather_documents")
+        if "documents" not in state.get("requested_sources", []):
+            state["document_context"] = None
+            return state
         if not self.document_service:
             state["document_context"] = None
             return state
@@ -228,6 +295,7 @@ class CloudAIInvestigator:
                     f"score {result['score']:.3f}]\n{result['text']}"
                 )
             state["document_context"] = "\n\n".join(excerpts)
+            state["execution"]["retrieval_counts"]["documents"] = len(results)
             logger.info("Retrieved %d knowledge-base chunks", len(results))
         except Exception as e:
             logger.warning("Failed to gather documents: %s", e)
@@ -288,57 +356,29 @@ class CloudAIInvestigator:
 
             system_prompt = "\n".join(context_parts)
 
-            # Use the central AI router — provider-first fallback
-            routing_result: RoutingResult = await self._router.generate_text(
-                prompt=state["question"],
-                system_prompt=system_prompt,
-                temperature=self.settings.llm_temperature,
-                max_tokens=self.settings.llm_max_tokens,
-            )
+            self._record_node(state, "analyze_and_conclude")
+            prompt_template = ChatPromptTemplate.from_messages([
+                ("system", "{system_prompt}"),
+                ("human", "{question}"),
+            ])
+            prompt_value = prompt_template.invoke({
+                "system_prompt": system_prompt,
+                "question": state["question"],
+            })
+            response = await self._langchain_model.ainvoke(prompt_value.messages)
+            routing_metadata = response.response_metadata
+            findings_text = str(response.content).strip()
 
             # Build routing metadata for the response
-            routing_metadata = {
-                "provider": (
-                    routing_result.successful_provider.value
-                    if routing_result.successful_provider
-                    else None
-                ),
-                "model": routing_result.successful_model,
-                "quality_tier": (
-                    routing_result.successful_quality_tier.value
-                    if routing_result.successful_quality_tier
-                    else None
-                ),
-                "total_latency_seconds": routing_result.total_latency_seconds,
-                "input_tokens": routing_result.input_tokens,
-                "output_tokens": routing_result.output_tokens,
-                "attempts": [
-                    {
-                        "provider": a.provider.value,
-                        "model": a.model_id,
-                        "succeeded": a.succeeded,
-                        "failure_category": (
-                            a.failure_category.value if a.failure_category else None
-                        ),
-                        "latency_seconds": a.latency_seconds,
-                    }
-                    for a in routing_result.attempts
-                ],
-            }
-
             state["routing_metadata"] = routing_metadata
 
-            if routing_result.unavailable or not routing_result.content:
-                error_msg = (
-                    routing_result.error
-                    or "All AI providers are currently unavailable. No paid models were used."
-                )
+            if routing_metadata.get("unavailable") or not findings_text or findings_text.lower() == "cloud ai providers returned no response.":
+                error_msg = routing_metadata.get("error") or "All eligible cloud AI providers returned no usable response. No paid models were used."
                 logger.warning("Investigation analysis unavailable: %s", error_msg)
                 state["error"] = error_msg
                 state["findings"] = None
                 state["recommendations"] = None
             else:
-                findings_text = routing_result.content
                 state["findings"] = findings_text
                 state["recommendations"] = findings_text
                 state["messages"] = [
@@ -348,8 +388,8 @@ class CloudAIInvestigator:
                 ]
                 logger.info(
                     "Generated investigation findings via %s/%s",
-                    routing_result.successful_provider,
-                    routing_result.successful_model,
+                    routing_metadata.get("provider"),
+                    routing_metadata.get("model"),
                 )
 
         except Exception as e:
@@ -367,6 +407,7 @@ class CloudAIInvestigator:
         question: str,
         user_id: UUID | None = None,
         conversation_context: str | None = None,
+        conversation_id: UUID | None = None,
     ) -> dict:
         """Run investigation workflow.
 
@@ -386,9 +427,44 @@ class CloudAIInvestigator:
                 "routing_metadata": None,
                 "user_id": user_id,
                 "conversation_context": conversation_context,
+                "intent": "",
+                "requested_sources": [],
+                "execution": {},
             }
 
-            final_state = await self.graph.ainvoke(initial_state)
+            thread_id = f"{user_id}:{conversation_id or 'adhoc'}"
+            final_state = await self.graph.ainvoke(
+                initial_state,
+                config={"configurable": {"thread_id": thread_id}},
+            )
+            if self.database and user_id and conversation_id:
+                thread_id = f"{user_id}:{conversation_id}"
+                checkpoint_state = {
+                    "question": question,
+                    "intent": final_state.get("intent"),
+                    "requested_sources": final_state.get("requested_sources", []),
+                    "incident_context": final_state.get("incident_context"),
+                    "metrics_data": final_state.get("metrics_data"),
+                    "document_context": final_state.get("document_context"),
+                    "execution": final_state.get("execution", {}),
+                    "routing_metadata": final_state.get("routing_metadata"),
+                    "findings": final_state.get("findings"),
+                    "error": final_state.get("error"),
+                }
+                checkpoint = self.database.query(InvestigationCheckpoint).filter_by(thread_id=thread_id).one_or_none()
+                if checkpoint is None:
+                    checkpoint = InvestigationCheckpoint(
+                        owner_id=user_id,
+                        conversation_id=conversation_id,
+                        thread_id=thread_id,
+                        state_json=json.dumps(checkpoint_state, default=str),
+                    )
+                    self.database.add(checkpoint)
+                else:
+                    if checkpoint.owner_id != user_id or checkpoint.conversation_id != conversation_id:
+                        raise PermissionError("Investigation checkpoint ownership mismatch.")
+                    checkpoint.state_json = json.dumps(checkpoint_state, default=str)
+                self.database.commit()
 
             data_sources = []
             if final_state.get("incident_context"):
@@ -404,9 +480,10 @@ class CloudAIInvestigator:
             findings_value = final_state.get("findings")
             error_value = final_state.get("error")
             
-            # If no findings and no error, provide helpful message
+            # Never turn an empty model response into a successful-looking
+            # finding. Callers persist/display the explicit error instead.
             if not findings_value and not error_value:
-                findings_value = "Investigation completed but no AI response was generated. Check that cloud AI provider keys are configured."
+                error_value = "Investigation completed without a usable AI response. No provider output was available."
             
             return {
                 "question": question,
@@ -415,6 +492,7 @@ class CloudAIInvestigator:
                     "incident_context": final_state.get("incident_context"),
                     "metrics_data": final_state.get("metrics_data"),
                     "document_context": final_state.get("document_context"),
+                    "execution": final_state.get("execution", {}),
                 },
                 "data_sources": data_sources,
                 "error": error_value,
@@ -440,6 +518,7 @@ async def get_cloud_investigator(
     document_service: DocumentService | None = None,
     incident_service: IncidentService | None = None,
     prometheus_client: PrometheusClient | None = None,
+    database: Session | None = None,
 ) -> CloudAIInvestigator:
     """Async factory: creates a CloudAIInvestigator backed by the singleton router."""
     router = await get_ai_router(settings)
@@ -449,4 +528,5 @@ async def get_cloud_investigator(
         document_service=document_service,
         incident_service=incident_service,
         prometheus_client=prometheus_client,
+        database=database,
     )

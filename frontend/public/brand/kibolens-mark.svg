@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">KiboLens mark</title><desc id="desc">A cyan observability lens with a heartbeat pulse</desc>
+  <defs><linearGradient id="ring" x1="12" y1="12" x2="116" y2="116" gradientUnits="userSpaceOnUse"><stop stop-color="#67e8f9"/><stop offset="1" stop-color="#0891b2"/></linearGradient></defs>
+  <circle cx="64" cy="64" r="52" fill="#071827" stroke="url(#ring)" stroke-width="7"/>
+  <circle cx="64" cy="64" r="35" fill="#0b2535" stroke="#22d3ee" stroke-opacity=".45" stroke-width="2"/>
+  <path d="M23 68h19l7-17 11 34 9-24 7 13h29" fill="none" stroke="#a5f3fc" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"/>
+</svg>

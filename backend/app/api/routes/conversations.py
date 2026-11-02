@@ -190,6 +190,7 @@ async def investigate_and_respond(
             document_service=document_service,
             incident_service=None,
             prometheus_client=prometheus_client,
+            database=database,
         )
         
         # Run investigation
@@ -197,6 +198,7 @@ async def investigate_and_respond(
             question=payload.content,
             user_id=user.id,
             conversation_context=conversation_context,
+            conversation_id=conversation.id,
         )
         
         # Determine what to persist as assistant message
@@ -207,6 +209,8 @@ async def investigate_and_respond(
         if findings:
             # We have actual findings from the AI
             assistant_content = findings
+            if result.get("data_sources"):
+                assistant_content += "\n\n---\n**Sources consulted:** " + ", ".join(result["data_sources"])
         elif error:
             # AI router failed, show the actual error
             assistant_content = f"Investigation could not be completed: {error}"

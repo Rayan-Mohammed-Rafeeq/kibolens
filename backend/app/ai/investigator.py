@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from datetime import timezone as tz
 from typing import Annotated, Literal, TypedDict
 from uuid import UUID
+from sqlalchemy.orm import Session
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -409,6 +410,7 @@ class AIInvestigator:
         question: str,
         user_id: UUID | None = None,
         conversation_context: str | None = None,
+        conversation_id: UUID | None = None,
     ) -> dict:
         """Run investigation workflow for a question.
         
@@ -453,9 +455,9 @@ class AIInvestigator:
             findings_value = final_state.get("findings")
             error_value = final_state.get("error")
             
-            # If no findings and no error, provide helpful message
+            # Empty output is an error, never a successful investigation.
             if not findings_value and not error_value:
-                findings_value = "Investigation completed but no AI response was generated. Check that AI provider keys (GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY) are configured."
+                error_value = "Investigation completed without a usable AI response."
 
             return {
                 "question": question,
@@ -488,6 +490,7 @@ async def get_investigator(
     document_service: DocumentService | None = None,
     incident_service: IncidentService | None = None,
     prometheus_client: PrometheusClient | None = None,
+    database: Session | None = None,
 ):
     """Factory function to create AI investigator.
     
@@ -511,6 +514,7 @@ async def get_investigator(
             document_service=document_service,
             incident_service=incident_service,
             prometheus_client=prometheus_client,
+            database=database,
         )
     
     # Legacy Ollama investigator
