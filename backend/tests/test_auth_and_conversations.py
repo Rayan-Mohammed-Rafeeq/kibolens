@@ -214,5 +214,72 @@ def test_investigation_creates_assistant_response(
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "What is the CPU usage?"
     assert messages[1]["role"] == "assistant"
-    # Assistant message should contain findings or error message
+    # Assistant message should contain meaningful content (not empty, not just "No findings generated")
     assert len(messages[1]["content"]) > 0
+    assert messages[1]["content"] != "No findings generated"
+    
+    # If findings is None, error should be populated with useful information
+    if result["findings"] is None:
+        assert result["error"] is not None
+        assert len(result["error"]) > 0
+    # If findings exist, they should be meaningful
+    elif result["findings"]:
+        # Should either be actual AI findings or a helpful error message
+        assert "unavailable" in result["findings"].lower() or \
+               "provider" in result["findings"].lower() or \
+               len(result["findings"]) > 50  # Real AI response would be longer
+
+
+
+def test_investigation_with_no_providers_shows_error(
+    client: TestClient, database: Session
+) -> None:
+    """Test that investigation shows helpful error when AI providers are unavailable."""
+    admin = bootstrap(database)
+    session_token, csrf_token = create_test_session(database, admin)
+    cookies = {"kibolens_session": session_token}
+
+    # Create conversation
+    created = client.post(
+        "/api/v1/conversations",
+        json={"title": "Provider Error Test"},
+        headers=headers(csrf_token),
+        cookies=cookies,
+    )
+    assert created.status_code == 201
+    conversation_id = created.json()["id"]
+
+    # Call investigation endpoint (will fail if no API keys configured)
+    investigation = client.post(
+        f"/api/v1/conversations/{conversation_id}/investigate",
+        json={"content": "What is the memory usage?"},
+        headers=headers(csrf_token),
+        cookies=cookies,
+    )
+    
+    # Should return 200 with error information
+    assert investigation.status_code == 200
+    result = investigation.json()
+    
+    # Get the persisted assistant message
+    messages_response = client.get(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        cookies=cookies,
+    )
+    assert messages_response.status_code == 200
+    messages = messages_response.json()["items"]
+    assert len(messages) == 2
+    
+    assistant_message = messages[1]["content"]
+    
+    # Assistant message should contain helpful error information
+    # It should mention the actual error (connection failed, unavailable, etc.)
+    assert "investigation could not be completed" in assistant_message.lower() or \
+           "unavailable" in assistant_message.lower() or \
+           "provider" in assistant_message.lower() or \
+           "connection" in assistant_message.lower() or \
+           "failed" in assistant_message.lower()
+    
+    # Should not be the old generic message
+    assert assistant_message != "No findings generated"
+    assert assistant_message != "Investigation completed but no findings were generated."

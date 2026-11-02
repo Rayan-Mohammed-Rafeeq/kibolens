@@ -1,0 +1,60 @@
+version: '3.8'
+
+# Invalid Docker Compose file for testing validation
+# This file intentionally contains errors
+
+services:
+  # Invalid: service name with spaces
+  "invalid service name":
+    image: alpine:3.19
+  
+  # Invalid: missing required image or build
+  no-image-or-build:
+    container_name: missing-image
+  
+  # Invalid: malformed environment
+  bad-environment:
+    image: alpine:3.19
+    environment:
+      - INVALID_FORMAT
+      - "ALSO_INVALID"
+      - MISSING_VALUE:
+  
+  # Invalid: unknown top-level key
+  invalid-restart-value:
+    image: alpine:3.19
+    restart: invalid-policy
+  
+  # Invalid: malformed ports
+  bad-ports:
+    image: alpine:3.19
+    ports:
+      - "not:a:valid:port:mapping"
+      - 99999:80
+  
+  # Invalid: malformed volumes
+  bad-volumes:
+    image: alpine:3.19
+    volumes:
+      - /invalid/volume/syntax
+  
+  # Invalid: circular dependency
+  circular-a:
+    image: alpine:3.19
+    depends_on:
+      - circular-b
+  
+  circular-b:
+    image: alpine:3.19
+    depends_on:
+      - circular-a
+
+# Invalid: unknown top-level key
+invalid_key:
+  something: "that doesn't belong here"
+
+# Malformed networks section
+networks:
+  invalid-network:
+    driver: nonexistent-driver
+    invalid_option: true

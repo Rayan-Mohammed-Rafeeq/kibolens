@@ -193,12 +193,23 @@ async def investigate_and_respond(
             user_id=user.id,
         )
         
-        # Add assistant message with findings
-        if result.get("findings"):
-            conversations.add_assistant_message(database, conversation, result["findings"])
+        # Determine what to persist as assistant message
+        # Priority: findings > error > default message
+        findings = result.get("findings")
+        error = result.get("error")
+        
+        if findings:
+            # We have actual findings from the AI
+            assistant_content = findings
+        elif error:
+            # AI router failed, show the actual error
+            assistant_content = f"Investigation could not be completed: {error}"
         else:
-            error_msg = result.get("error", "Investigation completed but no findings were generated.")
-            conversations.add_assistant_message(database, conversation, error_msg)
+            # Shouldn't happen, but provide fallback
+            assistant_content = "Investigation completed but no response was generated. Please check that AI provider keys are configured."
+        
+        # Add assistant message with the determined content
+        conversations.add_assistant_message(database, conversation, assistant_content)
         
         return InvestigationResponse(**result)
         

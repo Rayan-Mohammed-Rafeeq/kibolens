@@ -1,0 +1,250 @@
+version: '3.8'
+
+# Docker Failure Lab - Isolated Testing Environment
+# Profile: lab
+# Usage: docker compose --profile lab up [scenario-name]
+# Never use --profile lab in production
+
+networks:
+  lab:
+    driver: bridge
+    internal: true
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.description: "Isolated failure lab network - no external or production access"
+
+services:
+  # Scenario 1: Immediate Crash
+  lab-crasher:
+    build:
+      context: ./scenarios
+      dockerfile: crasher.Dockerfile
+    image: kibolens/lab-crasher:latest
+    container_name: kibolens-lab-crasher
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      EXIT_CODE: "${LAB_CRASHER_EXIT_CODE:-137}"
+      DELAY_SECONDS: "${LAB_CRASHER_DELAY:-2}"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+          pids: 10
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "crasher"
+      kibolens.lab.description: "Container that exits immediately with configurable code"
+
+  # Scenario 2: Unhealthy Service
+  lab-unhealthy:
+    build:
+      context: ./scenarios
+      dockerfile: unhealthy.Dockerfile
+    image: kibolens/lab-unhealthy:latest
+    container_name: kibolens-lab-unhealthy
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      FAIL_AFTER_CHECKS: "${LAB_UNHEALTHY_FAIL_AFTER:-3}"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+          pids: 10
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "unhealthy"
+      kibolens.lab.description: "Container that fails health checks after N attempts"
+
+  # Scenario 3: Restart Loop
+  lab-restart-loop:
+    build:
+      context: ./scenarios
+      dockerfile: restart-loop.Dockerfile
+    image: kibolens/lab-restart-loop:latest
+    container_name: kibolens-lab-restart-loop
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      CRASH_AFTER_SECONDS: "${LAB_RESTART_CRASH_AFTER:-10}"
+      EXIT_CODE: "${LAB_RESTART_EXIT_CODE:-1}"
+    restart: on-failure:5
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+          pids: 10
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "restart-loop"
+      kibolens.lab.description: "Container that crashes repeatedly triggering restart policy"
+
+  # Scenario 4: CPU Stress
+  lab-cpu-stress:
+    build:
+      context: ./scenarios
+      dockerfile: cpu-stress.Dockerfile
+    image: kibolens/lab-cpu-stress:latest
+    container_name: kibolens-lab-cpu-stress
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      CPU_WORKERS: "${LAB_CPU_WORKERS:-2}"
+      DURATION_SECONDS: "${LAB_CPU_DURATION:-60}"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 64M
+          pids: 20
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "cpu-stress"
+      kibolens.lab.description: "Container that generates high CPU load"
+
+  # Scenario 5: Memory Pressure
+  lab-memory-pressure:
+    build:
+      context: ./scenarios
+      dockerfile: memory-pressure.Dockerfile
+    image: kibolens/lab-memory-pressure:latest
+    container_name: kibolens-lab-memory-pressure
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      MEMORY_WORKERS: "${LAB_MEM_WORKERS:-1}"
+      MEMORY_PER_WORKER: "${LAB_MEM_PER_WORKER:-48M}"
+      DURATION_SECONDS: "${LAB_MEM_DURATION:-60}"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 64M
+          pids: 20
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "memory-pressure"
+      kibolens.lab.description: "Container that consumes memory until OOM"
+
+  # Scenario 6: Missing Dependency
+  lab-missing-dependency:
+    build:
+      context: ./scenarios
+      dockerfile: missing-dependency.Dockerfile
+    image: kibolens/lab-missing-dependency:latest
+    container_name: kibolens-lab-missing-dependency
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      MISSING_COMMAND: "${LAB_MISSING_CMD:-postgresql}"
+      DELAY_SECONDS: "${LAB_MISSING_DELAY:-3}"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+          pids: 10
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "missing-dependency"
+      kibolens.lab.description: "Container that fails due to missing dependencies"
+
+  # Scenario 7: Configuration Error
+  lab-config-error:
+    build:
+      context: ./scenarios
+      dockerfile: config-error.Dockerfile
+    image: kibolens/lab-config-error:latest
+    container_name: kibolens-lab-config-error
+    profiles:
+      - lab
+    networks:
+      - lab
+    environment:
+      REQUIRED_ENV_VAR: ""  # Intentionally empty to trigger error
+      CONFIG_FILE_PATH: "${LAB_CONFIG_FILE:-/config/app.conf}"
+      DELAY_SECONDS: "${LAB_CONFIG_DELAY:-2}"
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+          pids: 10
+    labels:
+      kibolens.lab: "true"
+      kibolens.lab.scenario: "config-error"
+      kibolens.lab.description: "Container that fails due to invalid configuration"

@@ -373,16 +373,24 @@ class CloudAIInvestigator:
             if not data_sources:
                 data_sources.append("General Knowledge Only")
 
+            # If findings are None but we have an error, the error is more informative
+            findings_value = final_state.get("findings")
+            error_value = final_state.get("error")
+            
+            # If no findings and no error, provide helpful message
+            if not findings_value and not error_value:
+                findings_value = "Investigation completed but no AI response was generated. Check that cloud AI provider keys are configured."
+            
             return {
                 "question": question,
-                "findings": final_state.get("findings") or "No findings generated",
+                "findings": findings_value,
                 "evidence": {
                     "incident_context": final_state.get("incident_context"),
                     "metrics_data": final_state.get("metrics_data"),
                     "document_context": final_state.get("document_context"),
                 },
                 "data_sources": data_sources,
-                "error": final_state.get("error"),
+                "error": error_value,
                 "routing_metadata": final_state.get("routing_metadata"),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
