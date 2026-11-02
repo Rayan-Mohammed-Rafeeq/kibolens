@@ -68,40 +68,13 @@ _VISION_MODEL_SUBSTRINGS = (
 # DO NOT add models unless you have verified free-plan eligibility.
 # Presence in /models endpoint is NOT sufficient proof.
 _GROQ_VERIFIED_FREE_MODEL_IDS = frozenset({
-    # NOTE: Deprecated model IDs removed per 2026-10-31 final audit.
-    # Removed: llama-3.3-70b-versatile, llama-3.1-70b-versatile, llama-3.1-8b-instant (deprecated),
-    #          deprecated Llama vision preview IDs.
-    #
-    # MINIMAL REGISTRY - Dynamic discovery from Groq's /models API is primary source.
-    # Only explicitly verified current free-plan models listed here.
-    
-    # Llama 3.3 speculative decoding (free-plan confirmed, actively supported)
-    "llama-3.3-70b-specdec",
-    # Llama 3.2 current (free-plan confirmed)
-    "llama-3.2-1b-preview",
-    "llama-3.2-3b-preview",
-    "llama-3.2-11b-vision-preview",
-    "llama-3.2-90b-vision-preview",
-    # Mixtral (free-plan confirmed)
-    "mixtral-8x7b-32768",
-    # Gemma 2 (free-plan confirmed)
-    "gemma2-9b-it",
-    "gemma-7b-it",
-    # DeepSeek (free-plan confirmed)
-    "deepseek-r1-distill-llama-70b",
-    # Qwen (free-plan confirmed by an authenticated generation request)
+    # Only the currently active model verified by an authenticated generation
+    # request is eligible. Catalogue presence alone is not sufficient.
     "qwen/qwen3.8-27b",
 })
 
 # Default verified Free-plan candidate models
 _DEFAULT_GROQ_TEXT_MODELS: list[dict[str, Any]] = [
-    # NOTE: Deprecated model IDs removed per 2026-10-31 final audit.
-    # Removed: llama-3.3-70b-versatile, llama-3.1-70b-versatile, llama-3.1-8b-instant (deprecated).
-    #
-    # MINIMAL REGISTRY - Dynamic discovery from Groq's /models API is primary source.
-    # Only explicitly verified current free-plan models listed here.
-    
-    # ADVANCED
     {
         "model_id": "qwen/qwen3.8-27b",
         "quality_tier": QualityTier.ADVANCED,
