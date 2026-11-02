@@ -400,6 +400,36 @@ async def test_docker_inventory_is_merged_with_cadvisor_metrics() -> None:
 
 
 @pytest.mark.anyio
+async def test_unavailable_vm_observer_does_not_break_docker_inventory() -> None:
+    class FakeClient:
+        async def instant_query(self, query: str):
+            return []
+
+    class FakeDockerObserver:
+        async def list_containers(self):
+            return [{"id": "docker-1", "name": "api", "status": "RUNNING"}]
+
+    class UnavailableVMObserver:
+        last_error = "libvirt daemon unavailable"
+
+        async def list_vms(self):
+            raise RuntimeError(self.last_error)
+
+    service = MonitoringService(
+        FakeClient(), Settings(), FakeDockerObserver(), UnavailableVMObserver()
+    )
+
+    containers = await service.containers()
+    items, availability, detail = await service.vm_inventory()
+
+    assert len(containers) == 1
+    assert containers[0].id == "docker-1"
+    assert items == []
+    assert availability == "unavailable"
+    assert detail == "VM monitoring is unavailable."
+
+
+@pytest.mark.anyio
 async def test_container_health_and_direct_metrics_are_distinct() -> None:
     old_timestamp = (datetime.now(UTC) - timedelta(minutes=10)).timestamp()
 

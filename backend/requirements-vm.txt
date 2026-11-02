@@ -1,5 +1,4 @@
-# Optional only. The normal backend image intentionally does not install this
-# native binding: VM discovery is best-effort and Docker/host monitoring must
-# remain buildable when the host libvirt headers are absent or incompatible.
-# Build this alongside a matching libvirt-dev/libvirt-devel installation.
+# Installed in the normal production backend image. Runtime VM discovery is
+# still optional: the backend starts when the host daemon/socket is absent.
+# The matching libvirt-dev/libvirt0 packages are installed by the image build.
 libvirt-python==12.8.0

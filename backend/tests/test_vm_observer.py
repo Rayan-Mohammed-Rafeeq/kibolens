@@ -1,14 +1,136 @@
+from __future__ import annotations
+
 import pytest
 
 from app.monitoring.vm_observer import VMObserver
 
 
+def test_libvirt_binding_is_importable_when_installed() -> None:
+    """The production image build also runs this import as a hard build check."""
+    libvirt = pytest.importorskip("libvirt")
+    assert callable(libvirt.openReadOnly)
+
+
 @pytest.mark.anyio
-async def test_vm_observer_returns_empty_inventory_without_optional_binding(monkeypatch) -> None:
+async def test_vm_observer_handles_missing_python_binding(monkeypatch) -> None:
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: None))
+
     observer = VMObserver()
+
     assert await observer.list_vms() == []
-    assert observer.last_error == (
-        "VM inventory is unavailable because the host libvirt connection "
-        "could not be queried; VM presence cannot be determined."
-    )
+    assert observer.last_error == VMObserver.UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
+    class FakeLibvirt:
+        @staticmethod
+        def openReadOnly(uri: str):
+            assert uri == "qemu:///system"
+            return None
+
+    monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
+
+    observer = VMObserver()
+
+    assert await observer.list_vms() == []
+    assert observer.last_error == VMObserver.UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_vm_observer_handles_unavailable_daemon(monkeypatch) -> None:
+    class FakeLibvirt:
+        @staticmethod
+        def openReadOnly(uri: str):
+            raise RuntimeError("failed to connect to the libvirt daemon")
+
+    monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
+
+    observer = VMObserver()
+
+    assert await observer.list_vms() == []
+    assert observer.last_error == VMObserver.UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_vm_observer_reports_available_empty_inventory(monkeypatch) -> None:
+    class FakeConnection:
+        def listAllDomains(self, flags: int):
+            assert flags == 0
+            return []
+
+        def close(self):
+            pass
+
+    class FakeLibvirt:
+        @staticmethod
+        def openReadOnly(uri: str):
+            return FakeConnection()
+
+    monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
+
+    observer = VMObserver()
+
+    assert await observer.list_vms() == []
+    assert observer.last_error is None
+
+
+@pytest.mark.anyio
+async def test_vm_observer_discovers_domains_from_test_connection(monkeypatch) -> None:
+    class FakeDomain:
+        def UUIDString(self):
+            return "vm-uuid-1"
+
+        def name(self):
+            return "future-vm"
+
+        def isActive(self):
+            return True
+
+        def info(self):
+            return (1, 1024, 512, 2, 0)
+
+        def XMLDesc(self, flags: int):
+            return """
+                <domain>
+                  <os><type>hvm</type></os>
+                  <devices>
+                    <channel type="unix">
+                      <target type="virtio" name="org.qemu.guest_agent.0"/>
+                    </channel>
+                  </devices>
+                </domain>
+            """
+
+        def interfaceAddresses(self, source: int, flags: int):
+            return {"vnet0": {"addrs": [{"addr": "192.0.2.10"}]}}
+
+    class FakeConnection:
+        def listAllDomains(self, flags: int):
+            return [FakeDomain()]
+
+        def close(self):
+            pass
+
+    class FakeLibvirt:
+        VIR_DOMAIN_RUNNING = 1
+        VIR_DOMAIN_PAUSED = 3
+        VIR_DOMAIN_SHUTOFF = 5
+
+        @staticmethod
+        def openReadOnly(uri: str):
+            assert uri == "qemu:///system"
+            return FakeConnection()
+
+    monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
+
+    observer = VMObserver("qemu:///system")
+    result = await observer.list_vms()
+
+    assert len(result) == 1
+    assert result[0]["id"] == "vm-uuid-1"
+    assert result[0]["name"] == "future-vm"
+    assert result[0]["status"] == "RUNNING"
+    assert result[0]["ip_addresses"] == ["192.0.2.10"]
+    assert result[0]["guest_agent_configured"] is True
+    assert observer.last_error is None

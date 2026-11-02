@@ -35,7 +35,9 @@ services:
       context: ..
       dockerfile: deployment/Dockerfiles/backend.Dockerfile
       args:
-        INSTALL_LIBVIRT: ${KIBOLENS_INSTALL_LIBVIRT:-true}
+        # Production images always include the binding. A development-only
+        # image can override INSTALL_LIBVIRT directly at docker build time.
+        INSTALL_LIBVIRT: "true"
     env_file:
       - ../.env
     environment:
@@ -43,6 +45,10 @@ services:
       KIBOLENS_CORS_ORIGINS: '["http://localhost:8080"]'
       KIBOLENS_QDRANT_URL: http://qdrant:6333
       KIBOLENS_PROMETHEUS_URL: http://prometheus:9090
+    # Pass the host socket's numeric group ID explicitly. Host and container
+    # group names/IDs are not assumed to match.
+    group_add:
+      - "${KIBOLENS_LIBVIRT_SOCKET_GID:-0}"
     volumes:
       - type: bind
         source: /mnt/kiboto-storage/kibolens-data/documents

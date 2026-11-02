@@ -8,10 +8,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 ARG INSTALL_LIBVIRT=true
 RUN if [ "$INSTALL_LIBVIRT" = "true" ]; then \
       apt-get update \
-      && apt-get install -y --no-install-recommends gcc pkg-config libvirt0 libvirt-dev \
+      && apt-get install -y --no-install-recommends \
+        gcc \
+        pkg-config \
+        python3-dev \
+        libvirt0 \
+        libvirt-dev \
       && printf 'libvirt-dev: ' \
       && dpkg-query -W -f='$${Version}\n' libvirt-dev \
-      && pip install --no-cache-dir -r requirements-vm.txt \
+      && python -m pip install --no-cache-dir "build==1.3.0" \
+      && python -m pip install --no-cache-dir --no-binary=libvirt-python -r requirements-vm.txt \
+      && python -c "import libvirt; print('libvirt-python:', libvirt.getVersion())" \
       && apt-get purge -y gcc pkg-config libvirt-dev \
       && rm -rf /var/lib/apt/lists/*; \
     fi

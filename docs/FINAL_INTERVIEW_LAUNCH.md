@@ -33,9 +33,11 @@ docker compose --env-file .env -f deployment/docker-compose.yml ps
 
 The standard backend image installs the native libvirt binding and the Compose
 configuration mounts the host's read-only `/var/run/libvirt` socket. The image
-build prints the resolved `libvirt-dev` version and installs
-`libvirt-python==12.8.0`. Set `KIBOLENS_INSTALL_LIBVIRT=false` only when
-building on a host that cannot install the native dependency.
+build prints the resolved `libvirt-dev` version, compiles `libvirt-python`
+from source with Python build tooling, imports the binding as a build check,
+and installs `libvirt-python==12.8.0`. The production Compose
+file always builds with VM support; only a direct development Docker build may
+explicitly pass `--build-arg INSTALL_LIBVIRT=false`.
 
 The deployment host must also run libvirt and expose `qemu:///system`; for a
 Debian/Ubuntu host, install and start it before rebuilding the backend:
@@ -44,6 +46,11 @@ Debian/Ubuntu host, install and start it before rebuilding the backend:
 sudo apt-get update
 sudo apt-get install -y libvirt-daemon-system qemu-kvm
 sudo systemctl enable --now libvirtd
+
+# Configure the host socket's numeric group ID in .env. Do not copy a group
+# name or assume the host GID matches a container group.
+stat -c '%g' /var/run/libvirt/libvirt-sock
+# KIBOLENS_LIBVIRT_SOCKET_GID=<the number printed above>
 ```
 
 Then rebuild and restart the backend so the binding is installed and the host
@@ -53,6 +60,13 @@ socket is mounted:
 docker compose --env-file .env -f deployment/docker-compose.yml build backend
 docker compose --env-file .env -f deployment/docker-compose.yml up -d backend
 ```
+
+The backend passes `KIBOLENS_LIBVIRT_SOCKET_GID` as a supplementary numeric
+group, so a host using a nonstandard libvirt group remains accessible without
+changing container group IDs. If the socket or daemon is absent, startup and
+Docker monitoring continue normally; once libvirt is installed and authorized,
+the next inventory poll discovers domains automatically. An available daemon
+with no domains is shown as an honest empty inventory.
 
 If the host has no libvirt daemon or no domains, the observer continues to
 distinguish unavailable monitoring from an available empty VM inventory.
