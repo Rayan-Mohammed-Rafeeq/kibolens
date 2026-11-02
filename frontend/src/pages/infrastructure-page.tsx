@@ -41,7 +41,7 @@ export function InfrastructurePage() {
 
     <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Virtual machines</h2></header>
-      {vms.isLoading ? <p className="p-5 text-sm text-zinc-500">Checking VM inventory…</p> : vms.isError || vms.data?.availability !== "available" ? <p className="p-5 text-sm text-zinc-400">{vms.data?.detail ?? "VM inventory is unavailable; VM presence cannot be determined."}</p> : vms.data.items.length ? <div className="divide-y divide-zinc-800">{vms.data.items.map((vm) => <VMRow key={vm.id} vm={vm} />)}</div> : <p className="p-5 text-sm text-zinc-500">No VMs are present in the available libvirt inventory.</p>}
+      {vms.isLoading ? <p className="p-5 text-sm text-zinc-500">Checking VM inventory…</p> : vms.isError || vms.data?.availability !== "available" ? <p className="p-5 text-sm text-zinc-400">{vms.data?.detail ?? "VM inventory is not connected yet. Start libvirtd on the host and authorize the mounted libvirt socket."}</p> : vms.data.items.length ? <div className="divide-y divide-zinc-800">{vms.data.items.map((vm) => <VMRow key={vm.id} vm={vm} />)}</div> : <p className="p-5 text-sm text-zinc-500">No VMs are present in the available libvirt inventory.</p>}
     </section>
   </section>;
 }

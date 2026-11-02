@@ -18,7 +18,8 @@ async def test_vm_observer_handles_missing_python_binding(monkeypatch) -> None:
     observer = VMObserver()
 
     assert await observer.list_vms() == []
-    assert observer.last_error == VMObserver.UNAVAILABLE_MESSAGE
+    assert observer.last_error is not None
+    assert "libvirt Python binding is not installed" in observer.last_error
 
 
 @pytest.mark.anyio
@@ -34,7 +35,11 @@ async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
     observer = VMObserver()
 
     assert await observer.list_vms() == []
-    assert observer.last_error == VMObserver.UNAVAILABLE_MESSAGE
+    assert observer.last_error == (
+        "VM inventory is unavailable: the libvirt connection 'qemu:///system' "
+        "could not be queried. Ensure libvirtd is running and /var/run/libvirt "
+        "is mounted and authorized."
+    )
 
 
 @pytest.mark.anyio
@@ -49,7 +54,8 @@ async def test_vm_observer_handles_unavailable_daemon(monkeypatch) -> None:
     observer = VMObserver()
 
     assert await observer.list_vms() == []
-    assert observer.last_error == VMObserver.UNAVAILABLE_MESSAGE
+    assert observer.last_error is not None
+    assert "failed to connect to the libvirt daemon" in observer.last_error
 
 
 @pytest.mark.anyio

@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class VMObserver:
-    UNAVAILABLE_MESSAGE = (
-        "VM inventory is unavailable because the host libvirt connection "
-        "could not be queried; VM presence cannot be determined."
-    )
-
     def __init__(self, uri: str = "qemu:///system") -> None:
         self.uri = uri
         self._previous_cpu: dict[str, tuple[int, float]] = {}
@@ -37,17 +32,32 @@ class VMObserver:
             return None
         return libvirt
 
+    def _connection_error(self, reason: str | None = None) -> str:
+        detail = (
+            f" {reason.strip()}"
+            if reason and reason.strip()
+            else " Ensure libvirtd is running and /var/run/libvirt is mounted and authorized."
+        )
+        return (
+            f"VM inventory is unavailable: the libvirt connection '{self.uri}' "
+            f"could not be queried.{detail}"
+        )
+
     def _list_sync(self) -> list[dict]:
         self.last_error = None
         libvirt = self._libvirt()
         if libvirt is None:
-            self.last_error = self.UNAVAILABLE_MESSAGE
+            self.last_error = (
+                "VM inventory is unavailable: the libvirt Python binding is not "
+                "installed in the backend image. Rebuild the production backend "
+                "with VM support enabled."
+            )
             return []
         connection = None
         try:
             connection = libvirt.openReadOnly(self.uri)
             if connection is None:
-                self.last_error = self.UNAVAILABLE_MESSAGE
+                self.last_error = self._connection_error()
                 return []
             now = time.monotonic()
             observed_at = datetime.now(timezone.utc)
@@ -59,7 +69,7 @@ class VMObserver:
                     logger.debug("Unable to inspect libvirt domain: %s", exc)
             return output
         except Exception as exc:
-            self.last_error = self.UNAVAILABLE_MESSAGE
+            self.last_error = self._connection_error(str(exc))
             logger.info("libvirt inventory unavailable: %s", type(exc).__name__)
             return []
         finally:
@@ -163,6 +173,6 @@ class VMObserver:
         try:
             return await asyncio.to_thread(self._list_sync)
         except Exception as exc:
-            self.last_error = self.UNAVAILABLE_MESSAGE
+            self.last_error = self._connection_error(str(exc))
             logger.warning("VM observer unavailable: %s", type(exc).__name__)
             return []
