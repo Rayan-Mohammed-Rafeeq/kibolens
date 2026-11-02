@@ -1,5 +1,5 @@
 export type HealthState = "HEALTHY" | "DEGRADED" | "CRITICAL" | "UNKNOWN";
-export type Availability = "available" | "stale" | "unavailable";
+export type Availability = "available" | "stale" | "unavailable" | "unconfigured";
 
 export interface MetricReading { name: string; value: number | null; unit: string; observation_at: string | null; availability: Availability; }
 export interface InfrastructureSummary { health: { state: HealthState; evidence: string[]; assessed_at: string }; metrics: MetricReading[]; monitoring_available: boolean; last_successful_collection: string | null; }

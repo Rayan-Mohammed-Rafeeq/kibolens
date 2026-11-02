@@ -44,7 +44,7 @@ describe("InfrastructurePage - VM Empty State", () => {
   it("displays empty state for unconfigured VM integration (socket absent)", async () => {
     vi.mocked(monitoringService.monitoringService.vmInventory).mockResolvedValue({
       items: [],
-      availability: "available",
+      availability: "unconfigured",
       detail: null,
     });
 
@@ -62,12 +62,8 @@ describe("InfrastructurePage - VM Empty State", () => {
 
     expect(
       screen.getByText(
-        /No libvirt-managed virtual machines are currently configured on this host/i
+        /No libvirt-managed virtual machines are currently configured on this host.*Configure libvirt/i
       )
-    ).toBeTruthy();
-
-    expect(
-      screen.getByText(/Configure libvirt on this host to monitor virtual machines/i)
     ).toBeTruthy();
   });
 
@@ -89,6 +85,16 @@ describe("InfrastructurePage - VM Empty State", () => {
     await waitFor(() => {
       const heading = screen.getAllByText("No virtual machines detected")[0];
       expect(heading).toBeTruthy();
+    });
+
+    // Should NOT show "Configure libvirt" message for available state
+    await waitFor(() => {
+      const text = screen.getByText(
+        "No libvirt-managed virtual machines are currently configured on this host."
+      );
+      expect(text).toBeTruthy();
+      // Verify the full text doesn't include "Configure libvirt"
+      expect(text.textContent).not.toContain("Configure libvirt");
     });
   });
 

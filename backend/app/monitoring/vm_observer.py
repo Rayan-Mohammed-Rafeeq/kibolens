@@ -22,6 +22,7 @@ class VMObserver:
         self._previous_cpu: dict[str, tuple[int, float]] = {}
         self._active_since: dict[str, float] = {}
         self.last_error: str | None = None
+        self.is_unconfigured: bool = False
 
     @staticmethod
     def _libvirt():
@@ -45,6 +46,7 @@ class VMObserver:
 
     def _list_sync(self) -> list[dict]:
         self.last_error = None
+        self.is_unconfigured = False
         libvirt = self._libvirt()
         if libvirt is None:
             self.last_error = (
@@ -57,8 +59,9 @@ class VMObserver:
         try:
             connection = libvirt.openReadOnly(self.uri)
             if connection is None:
-                # Socket absent or libvirt not configured - treat as normal empty state
+                # Socket absent or libvirt not configured - treat as unconfigured
                 logger.info("libvirt socket not available, treating as unconfigured VM integration")
+                self.is_unconfigured = True
                 return []
             now = time.monotonic()
             observed_at = datetime.now(timezone.utc)

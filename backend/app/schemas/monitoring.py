@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-MetricAvailability = Literal["available", "stale", "unavailable"]
+MetricAvailability = Literal["available", "stale", "unavailable", "unconfigured"]
 HealthState = Literal["HEALTHY", "DEGRADED", "CRITICAL", "UNKNOWN"]
 
 

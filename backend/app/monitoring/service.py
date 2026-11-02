@@ -218,9 +218,17 @@ class MonitoringService:
             return [], "unavailable", "VM inventory is unavailable; VM presence cannot be determined."
         try:
             items = [VirtualMachineStatus.model_validate(item) for item in await self.vm_observer.list_vms()]
+            
+            # Check for unconfigured state (socket absent)
+            if getattr(self.vm_observer, "is_unconfigured", False):
+                return items, "unconfigured", None
+            
+            # Check for genuine errors (connection, permission, daemon failures)
             observer_error = getattr(self.vm_observer, "last_error", None)
             if observer_error:
                 return items, "unavailable", observer_error
+            
+            # Successful connection and query (including 0 VMs)
             return items, "available", None
         except Exception:
             return [], "unavailable", "VM monitoring is unavailable."

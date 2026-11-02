@@ -24,7 +24,7 @@ async def test_vm_observer_handles_missing_python_binding(monkeypatch) -> None:
 
 @pytest.mark.anyio
 async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
-    """When libvirt socket is absent, treat as normal unconfigured/empty state."""
+    """When libvirt socket is absent, treat as unconfigured state."""
     class FakeLibvirt:
         @staticmethod
         def openReadOnly(uri: str):
@@ -37,6 +37,7 @@ async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
 
     assert await observer.list_vms() == []
     assert observer.last_error is None
+    assert observer.is_unconfigured is True
 
 
 @pytest.mark.anyio
@@ -75,6 +76,7 @@ async def test_vm_observer_handles_permission_error(monkeypatch) -> None:
 
 @pytest.mark.anyio
 async def test_vm_observer_reports_available_empty_inventory(monkeypatch) -> None:
+    """Successful connection with zero VMs reports available (not unconfigured)."""
     class FakeConnection:
         def listAllDomains(self, flags: int):
             assert flags == 0
@@ -94,6 +96,7 @@ async def test_vm_observer_reports_available_empty_inventory(monkeypatch) -> Non
 
     assert await observer.list_vms() == []
     assert observer.last_error is None
+    assert observer.is_unconfigured is False
 
 
 @pytest.mark.anyio

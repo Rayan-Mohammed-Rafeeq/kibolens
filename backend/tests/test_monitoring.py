@@ -431,20 +431,46 @@ async def test_unavailable_vm_observer_does_not_break_docker_inventory() -> None
 
 
 @pytest.mark.anyio
-async def test_unconfigured_vm_observer_returns_empty_inventory() -> None:
-    """When VM integration is unconfigured (socket absent), return available empty inventory."""
+async def test_unconfigured_vm_observer_returns_unconfigured_inventory() -> None:
+    """When VM integration is unconfigured (socket absent), return unconfigured state."""
     class FakeClient:
         async def instant_query(self, query: str):
             return []
 
     class UnconfiguredVMObserver:
         last_error = None
+        is_unconfigured = True
 
         async def list_vms(self):
             return []
 
     service = MonitoringService(
         FakeClient(), Settings(), None, UnconfiguredVMObserver()
+    )
+
+    items, availability, detail = await service.vm_inventory()
+
+    assert items == []
+    assert availability == "unconfigured"
+    assert detail is None
+
+
+@pytest.mark.anyio
+async def test_available_vm_observer_with_zero_vms() -> None:
+    """When libvirt connects successfully with zero VMs, return available state."""
+    class FakeClient:
+        async def instant_query(self, query: str):
+            return []
+
+    class AvailableVMObserver:
+        last_error = None
+        is_unconfigured = False
+
+        async def list_vms(self):
+            return []
+
+    service = MonitoringService(
+        FakeClient(), Settings(), None, AvailableVMObserver()
     )
 
     items, availability, detail = await service.vm_inventory()
