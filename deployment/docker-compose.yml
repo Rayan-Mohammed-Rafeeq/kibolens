@@ -35,7 +35,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfiles/backend.Dockerfile
       args:
-        INSTALL_LIBVIRT: ${KIBOLENS_INSTALL_LIBVIRT:-false}
+        INSTALL_LIBVIRT: ${KIBOLENS_INSTALL_LIBVIRT:-true}
     env_file:
       - ../.env
     environment:
@@ -51,8 +51,7 @@ services:
         bind:
           create_host_path: false
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Optional read-only libvirt access. Hosts without libvirt simply expose
-      # an empty directory and the VM observer returns an honest empty state.
+      # Read-only access to the host libvirt socket for VM inventory.
       - type: bind
         source: /var/run/libvirt
         target: /var/run/libvirt

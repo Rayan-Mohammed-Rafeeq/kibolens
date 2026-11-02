@@ -215,7 +215,7 @@ class MonitoringService:
 
     async def vm_inventory(self) -> tuple[list[VirtualMachineStatus], str, str | None]:
         if not self.vm_observer:
-            return [], "unavailable", "VM monitoring is disabled or the optional libvirt observer is unavailable."
+            return [], "unavailable", "VM inventory is unavailable; VM presence cannot be determined."
         try:
             items = [VirtualMachineStatus.model_validate(item) for item in await self.vm_observer.list_vms()]
             observer_error = getattr(self.vm_observer, "last_error", None)

@@ -31,13 +31,31 @@ docker compose --env-file .env -f deployment/docker-compose.yml --profile monito
 docker compose --env-file .env -f deployment/docker-compose.yml ps
 ```
 
-The standard image leaves the native libvirt binding out deliberately so a
-missing or incompatible hypervisor development header cannot block KiboLens.
-To opt into the binding on a Linux host, set `KIBOLENS_INSTALL_LIBVIRT=true`
-in the server-local environment before the backend build. The image build
-prints the resolved `libvirt-dev` version and installs `libvirt-python==12.8.0`.
-The observer still reports an honest empty/unavailable VM inventory when the
-binding or `/var/run/libvirt` connection is absent.
+The standard backend image installs the native libvirt binding and the Compose
+configuration mounts the host's read-only `/var/run/libvirt` socket. The image
+build prints the resolved `libvirt-dev` version and installs
+`libvirt-python==12.8.0`. Set `KIBOLENS_INSTALL_LIBVIRT=false` only when
+building on a host that cannot install the native dependency.
+
+The deployment host must also run libvirt and expose `qemu:///system`; for a
+Debian/Ubuntu host, install and start it before rebuilding the backend:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libvirt-daemon-system qemu-kvm
+sudo systemctl enable --now libvirtd
+```
+
+Then rebuild and restart the backend so the binding is installed and the host
+socket is mounted:
+
+```bash
+docker compose --env-file .env -f deployment/docker-compose.yml build backend
+docker compose --env-file .env -f deployment/docker-compose.yml up -d backend
+```
+
+If the host has no libvirt daemon or no domains, the observer continues to
+distinguish unavailable monitoring from an available empty VM inventory.
 
 Build the isolated lab image once; this does not start a scenario:
 

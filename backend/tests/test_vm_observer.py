@@ -8,4 +8,7 @@ async def test_vm_observer_returns_empty_inventory_without_optional_binding(monk
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: None))
     observer = VMObserver()
     assert await observer.list_vms() == []
-    assert observer.last_error == "Optional libvirt Python binding is unavailable."
+    assert observer.last_error == (
+        "VM inventory is unavailable because the host libvirt connection "
+        "could not be queried; VM presence cannot be determined."
+    )

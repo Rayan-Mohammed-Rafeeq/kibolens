@@ -5,10 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY backend/requirements.txt ./requirements.txt
 COPY backend/requirements-vm.txt ./requirements-vm.txt
 RUN pip install --no-cache-dir -r requirements.txt
-ARG INSTALL_LIBVIRT=false
+ARG INSTALL_LIBVIRT=true
 RUN if [ "$INSTALL_LIBVIRT" = "true" ]; then \
       apt-get update \
-      && apt-get install -y --no-install-recommends gcc pkg-config libvirt-dev \
+      && apt-get install -y --no-install-recommends gcc pkg-config libvirt0 libvirt-dev \
       && printf 'libvirt-dev: ' \
       && dpkg-query -W -f='$${Version}\n' libvirt-dev \
       && pip install --no-cache-dir -r requirements-vm.txt \

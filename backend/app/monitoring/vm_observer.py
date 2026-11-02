@@ -36,13 +36,19 @@ class VMObserver:
         self.last_error = None
         libvirt = self._libvirt()
         if libvirt is None:
-            self.last_error = "Optional libvirt Python binding is unavailable."
+            self.last_error = (
+                "VM inventory is unavailable because the host libvirt connection "
+                "could not be queried; VM presence cannot be determined."
+            )
             return []
         connection = None
         try:
             connection = libvirt.openReadOnly(self.uri)
             if connection is None:
-                self.last_error = "The host libvirt connection is unavailable."
+                self.last_error = (
+                    "VM inventory is unavailable because the host libvirt connection "
+                    "could not be queried; VM presence cannot be determined."
+                )
                 return []
             now = time.monotonic()
             observed_at = datetime.now(timezone.utc)
@@ -54,7 +60,10 @@ class VMObserver:
                     logger.debug("Unable to inspect libvirt domain: %s", exc)
             return output
         except Exception as exc:
-            self.last_error = "The host libvirt connection is unavailable."
+            self.last_error = (
+                "VM inventory is unavailable because the host libvirt connection "
+                "could not be queried; VM presence cannot be determined."
+            )
             logger.info("libvirt inventory unavailable: %s", type(exc).__name__)
             return []
         finally:
