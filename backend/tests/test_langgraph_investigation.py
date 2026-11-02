@@ -57,14 +57,22 @@ async def test_langgraph_routes_relevant_sources_and_uses_langchain_adapter():
 @pytest.mark.asyncio
 async def test_langgraph_preserves_full_response_and_reports_output_limit():
     full_content = "## Complete section\n\n" + ("Evidence line. " * 150)
+    calls = {"count": 0}
 
     class TruncatedRouter(FakeRouter):
         async def generate_text(self, **kwargs):
+            calls["count"] += 1
             result = await super().generate_text(**kwargs)
-            result.content = full_content
-            result.finish_reason = "MAX_TOKENS"
-            result.incomplete = True
-            result.incomplete_reason = "output_token_limit"
+            if calls["count"] == 1:
+                result.content = "## Complete section\n\nEvidence before the boundary."
+                result.finish_reason = "MAX_TOKENS"
+                result.incomplete = True
+                result.incomplete_reason = "output_token_limit"
+            else:
+                result.content = full_content
+                result.finish_reason = "STOP"
+                result.incomplete = False
+                result.incomplete_reason = None
             return result
 
     investigator = CloudAIInvestigator(
@@ -73,6 +81,9 @@ async def test_langgraph_preserves_full_response_and_reports_output_limit():
     )
     result = await investigator.investigate("Provide the complete infrastructure analysis")
 
+    assert "Evidence before the boundary." in result["findings"]
     assert full_content in result["findings"]
-    assert "output-token limit" in result["findings"]
-    assert result["routing_metadata"]["incomplete"] is True
+    assert "output-token limit" not in result["findings"]
+    assert result["routing_metadata"]["continuation_used"] is True
+    assert result["routing_metadata"]["incomplete"] is False
+    assert calls["count"] == 2

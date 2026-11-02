@@ -174,6 +174,19 @@ class CloudAIInvestigator:
     def _record_node(state: InvestigationState, name: str) -> None:
         state.setdefault("execution", {}).setdefault("nodes", []).append(name)
 
+    @staticmethod
+    def _merge_continuation(original: str, continuation: str) -> str:
+        """Append one provider continuation while avoiding an exact boundary repeat."""
+        if not continuation:
+            return original
+        if not original:
+            return continuation
+        max_overlap = min(len(original), len(continuation), 2000)
+        for size in range(max_overlap, 39, -1):
+            if original[-size:] == continuation[:size]:
+                return original + continuation[size:]
+        return f"{original}\n\n{continuation}"
+
     # ─── Context-gathering nodes (semantics preserved from original) ──────────
 
     async def _gather_incident_context(
@@ -372,12 +385,51 @@ class CloudAIInvestigator:
             findings_text = str(response.content)
 
             if routing_metadata.get("incomplete") and findings_text.strip():
-                separator = "" if findings_text.endswith("\n") else "\n"
-                findings_text = (
-                    f"{findings_text}{separator}\n> **Response status:** The provider stopped at its "
-                    "output-token limit. The content above is the complete provider response "
-                    "but may be incomplete."
-                )
+                try:
+                    continuation = await self._langchain_model.ainvoke([
+                        *prompt_value.messages,
+                        AIMessage(content=findings_text),
+                        HumanMessage(
+                            content=(
+                                "Continue the same infrastructure analysis from exactly where the "
+                                "previous response stopped. Do not repeat the completed content. "
+                                "Return only the remaining sections and keep observed evidence "
+                                "separate from hypotheses."
+                            )
+                        ),
+                    ])
+                    continuation_metadata = continuation.response_metadata
+                    continuation_text = str(continuation.content)
+                    continuation_available = not continuation_metadata.get("unavailable")
+                    if continuation_available:
+                        findings_text = self._merge_continuation(findings_text, continuation_text)
+                    routing_metadata = {
+                        **routing_metadata,
+                        "continuation_used": True,
+                        "continuation_provider": continuation_metadata.get("provider"),
+                        "continuation_model": continuation_metadata.get("model"),
+                        "continuation_finish_reason": continuation_metadata.get("finish_reason"),
+                        "continuation_incomplete": continuation_metadata.get("incomplete", False),
+                        "continuation_error": continuation_metadata.get("error") if not continuation_available else None,
+                        "incomplete": (continuation_metadata.get("incomplete", False) if continuation_available else True),
+                        "incomplete_reason": continuation_metadata.get("incomplete_reason") or "continuation_unavailable",
+                    }
+                except Exception as exc:
+                    logger.warning("Bounded AI continuation failed; preserving first response: %s", exc)
+                    routing_metadata = {
+                        **routing_metadata,
+                        "continuation_used": False,
+                        "continuation_error": type(exc).__name__,
+                        "incomplete": True,
+                        "incomplete_reason": "continuation_failed",
+                    }
+                if routing_metadata.get("incomplete"):
+                    separator = "" if findings_text.endswith("\n") else "\n"
+                    findings_text = (
+                        f"{findings_text}{separator}\n> **Response status:** The provider stopped at its "
+                        "output-token limit after one bounded continuation. The content above "
+                        "is the complete response returned by the providers but may be incomplete."
+                    )
 
             # Build routing metadata for the response
             state["routing_metadata"] = routing_metadata

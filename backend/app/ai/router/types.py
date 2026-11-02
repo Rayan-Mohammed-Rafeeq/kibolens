@@ -89,7 +89,13 @@ OUTPUT_LIMIT_FINISH_REASONS = frozenset({
 
 def output_limit_reached(finish_reason: str | None) -> bool:
     """Return whether a provider stopped because its output budget was exhausted."""
-    return bool(finish_reason and finish_reason in OUTPUT_LIMIT_FINISH_REASONS)
+    return bool(
+        finish_reason
+        and (
+            finish_reason in OUTPUT_LIMIT_FINISH_REASONS
+            or finish_reason.lower() in {reason.lower() for reason in OUTPUT_LIMIT_FINISH_REASONS}
+        )
+    )
 
 # Errors that mark the whole provider as unavailable
 PROVIDER_WIDE_FAILURE_CATEGORIES = frozenset(
