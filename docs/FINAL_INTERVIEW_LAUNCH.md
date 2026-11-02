@@ -22,16 +22,27 @@ those changes before continuing. Never reset the server tree.
 
 ```bash
 cd /home/sysadmin/kibolens
-docker compose --env-file .env -f deployment/docker-compose.yml up -d
+docker compose --env-file .env -f deployment/docker-compose.yml build backend frontend
+docker compose --env-file .env -f deployment/docker-compose.yml up -d backend frontend
+docker compose --env-file .env -f deployment/docker-compose.yml exec backend alembic heads
+docker compose --env-file .env -f deployment/docker-compose.yml exec backend alembic current
 docker compose --env-file .env -f deployment/docker-compose.yml exec backend alembic upgrade head
-docker compose --env-file .env -f deployment/docker-compose.yml up -d --build backend frontend
 docker compose --env-file .env -f deployment/docker-compose.yml --profile monitoring up -d
 docker compose --env-file .env -f deployment/docker-compose.yml ps
 ```
 
+The standard image leaves the native libvirt binding out deliberately so a
+missing or incompatible hypervisor development header cannot block KiboLens.
+To opt into the binding on a Linux host, set `KIBOLENS_INSTALL_LIBVIRT=true`
+in the server-local environment before the backend build. The image build
+prints the resolved `libvirt-dev` version and installs `libvirt-python==12.8.0`.
+The observer still reports an honest empty/unavailable VM inventory when the
+binding or `/var/run/libvirt` connection is absent.
+
 Build the isolated lab image once; this does not start a scenario:
 
 ```bash
+docker compose --env-file .env -f deployment/failure-lab/docker-compose.yml --profile lab config --services
 docker compose --env-file .env -f deployment/failure-lab/docker-compose.yml --profile lab build interview-demo
 ```
 

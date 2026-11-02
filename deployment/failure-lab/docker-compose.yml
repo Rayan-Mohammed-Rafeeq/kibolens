@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Docker Failure Lab - Isolated Testing Environment
 # Profile: lab
 # Usage: docker compose --profile lab up [scenario-name]
@@ -16,7 +14,7 @@ networks:
 services:
   # Dedicated interview workflow: fails once with a real exit code and can be
   # recreated healthy through the administrator Recovery action.
-  lab-interview-demo:
+  interview-demo:
     build:
       context: ./scenarios
       dockerfile: interview-demo.Dockerfile

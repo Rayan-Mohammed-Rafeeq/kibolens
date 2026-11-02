@@ -95,6 +95,7 @@ def test_health_assessment_uses_configured_thresholds() -> None:
 
 def test_infrastructure_endpoint_requires_authentication(client: TestClient) -> None:
     assert client.get("/api/v1/infrastructure/summary").status_code == 401
+    assert client.get("/api/v1/infrastructure/vms").status_code == 401
 
 
 def test_alert_webhook_requires_bearer_token_and_correlates_repeats(

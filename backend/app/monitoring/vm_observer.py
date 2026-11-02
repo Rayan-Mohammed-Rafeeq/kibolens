@@ -26,7 +26,8 @@ class VMObserver:
     def _libvirt():
         try:
             import libvirt  # type: ignore
-        except ImportError:
+        except (ImportError, OSError) as exc:
+            logger.info("Optional libvirt Python binding unavailable: %s", type(exc).__name__)
             return None
         return libvirt
 
