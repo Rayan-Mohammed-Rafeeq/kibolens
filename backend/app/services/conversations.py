@@ -68,3 +68,12 @@ def add_user_message(database: Session, conversation: Conversation, content: str
     database.commit()
     database.refresh(message)
     return message
+
+
+def add_assistant_message(database: Session, conversation: Conversation, content: str) -> Message:
+    """Add an assistant message to a conversation."""
+    message = Message(conversation_id=conversation.id, role="assistant", content=content.strip())
+    database.add(message)
+    database.commit()
+    database.refresh(message)
+    return message

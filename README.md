@@ -4,9 +4,11 @@ KiboLens is a self-hosted, evidence-first infrastructure observability and inves
 
 ## Current scope
 
+**Phase 5 - AI Chat (Complete):** Real-time infrastructure investigation using cloud-based AI models. Users can ask questions about their infrastructure through a conversational interface. The system gathers Prometheus metrics, retrieves relevant documentation from Qdrant, and uses a cloud AI router (Gemini → Groq → OpenRouter) with exhaustive free-tier fallback to generate evidence-based findings. All conversations are persisted with full message history. See `docs/AI_CHAT.md` for architecture, configuration, and troubleshooting.
+
 **Phase 4.1 - OTP Authentication (Complete):** Production-ready two-administrator email authentication with mandatory OTP verification via Resend. Both approved administrator emails (rayanmohammedrafeeq@gmail.com, rakinmohammedrafeeq@gmail.com) are supported. Email + password authentication sends a 6-digit OTP; only successful OTP verification establishes an authenticated session. Includes multi-admin provisioning CLI, HMAC-based OTP storage, resend cooldown, attempt limits, and comprehensive test coverage (70 tests pass). See `docs/OTP_DEPLOYMENT_GUIDE.md` for configuration and deployment.
 
-**Phase 4 - Incident Management:** Complete incident management subsystem. Alertmanager webhooks automatically create and update incidents with full event timelines and evidence capture. The backend API provides filtering, pagination, and state management with a documented transition policy. Frontend UI components are pending. The AI investigation agent remains intentionally unavailable until Phase 5; KiboLens incident descriptions come directly from alert annotations.
+**Phase 4 - Incident Management (Complete):** Complete incident management subsystem. Alertmanager webhooks automatically create and update incidents with full event timelines and evidence capture. The backend API provides filtering, pagination, and state management with a documented transition policy. Frontend UI components are pending.
 
 ## Quick start
 

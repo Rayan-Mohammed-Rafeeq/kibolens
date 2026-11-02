@@ -1,6 +1,11 @@
+import logging
 import uuid
 
+from app.ai.cloud_embeddings import CloudEmbeddingService
+from app.ai.investigator import get_investigator
 from app.api.dependencies import CsrfSession, CurrentUser, DatabaseSession
+from app.core.config import get_settings
+from app.monitoring.prometheus import PrometheusClient
 from app.schemas.conversation import (
     ConversationCreate,
     ConversationListResponse,
@@ -10,8 +15,13 @@ from app.schemas.conversation import (
     MessageListResponse,
     MessageResponse,
 )
+from app.schemas.documents import InvestigationResponse
 from app.services import conversations
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from app.services.documents import DocumentService
+from app.services.qdrant import get_qdrant_service
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -129,3 +139,74 @@ def create_message(
 ) -> MessageResponse:
     conversation = owned_conversation(database, user, conversation_id)
     return message_response(conversations.add_user_message(database, conversation, payload.content))
+
+
+@router.post(
+    "/{conversation_id}/investigate",
+    response_model=InvestigationResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def investigate_and_respond(
+    conversation_id: uuid.UUID,
+    payload: MessageCreate,
+    database: DatabaseSession,
+    user: CurrentUser,
+    _: CsrfSession,
+    settings = Depends(get_settings),
+) -> InvestigationResponse:
+    """Create user message, run AI investigation, and add assistant response.
+    
+    This endpoint:
+    1. Creates a user message with the question
+    2. Runs AI investigation using cloud router
+    3. Retrieves Prometheus metrics and Qdrant documents
+    4. Creates an assistant message with the findings
+    5. Returns the investigation response with routing metadata
+    """
+    conversation = owned_conversation(database, user, conversation_id)
+    
+    # Add user message
+    conversations.add_user_message(database, conversation, payload.content)
+    
+    try:
+        # Initialize services
+        qdrant_service = get_qdrant_service(settings)
+        embedding_service = CloudEmbeddingService(settings)
+        document_service = DocumentService(qdrant_service, embedding_service)
+        
+        prometheus_client = PrometheusClient(
+            base_url=settings.prometheus_url,
+            timeout_seconds=settings.prometheus_timeout_seconds,
+        )
+        
+        # Create investigator with cloud router
+        investigator = await get_investigator(
+            settings=settings,
+            document_service=document_service,
+            incident_service=None,
+            prometheus_client=prometheus_client,
+        )
+        
+        # Run investigation
+        result = await investigator.investigate(
+            question=payload.content,
+            user_id=user.id,
+        )
+        
+        # Add assistant message with findings
+        if result.get("findings"):
+            conversations.add_assistant_message(database, conversation, result["findings"])
+        else:
+            error_msg = result.get("error", "Investigation completed but no findings were generated.")
+            conversations.add_assistant_message(database, conversation, error_msg)
+        
+        return InvestigationResponse(**result)
+        
+    except Exception as e:
+        logger.exception("Investigation failed: %s", e)
+        error_response = f"Investigation failed: {str(e)}"
+        conversations.add_assistant_message(database, conversation, error_response)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_response,
+        )

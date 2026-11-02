@@ -164,3 +164,55 @@ def test_conversations_are_persisted_paginated_and_private(
     )
     assert client.get(f"/api/v1/conversations/{conversation_id}", cookies=cookies).status_code == 404
     assert admin.username == "admin"
+
+
+def test_investigation_creates_assistant_response(
+    client: TestClient, database: Session
+) -> None:
+    """Test that investigation endpoint creates user message, runs AI, and adds assistant response."""
+    admin = bootstrap(database)
+    session_token, csrf_token = create_test_session(database, admin)
+    cookies = {"kibolens_session": session_token}
+
+    # Create conversation
+    created = client.post(
+        "/api/v1/conversations",
+        json={"title": "AI Test"},
+        headers=headers(csrf_token),
+        cookies=cookies,
+    )
+    assert created.status_code == 201
+    conversation_id = created.json()["id"]
+
+    # Call investigation endpoint
+    investigation = client.post(
+        f"/api/v1/conversations/{conversation_id}/investigate",
+        json={"content": "What is the CPU usage?"},
+        headers=headers(csrf_token),
+        cookies=cookies,
+    )
+    
+    # Should return investigation response
+    assert investigation.status_code == 200
+    result = investigation.json()
+    assert result["question"] == "What is the CPU usage?"
+    assert "findings" in result
+    assert "evidence" in result
+    assert "data_sources" in result
+    assert "routing_metadata" in result
+    
+    # Verify both user and assistant messages were created
+    messages_response = client.get(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        cookies=cookies,
+    )
+    assert messages_response.status_code == 200
+    messages = messages_response.json()["items"]
+    
+    # Should have user message and assistant response
+    assert len(messages) == 2
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "What is the CPU usage?"
+    assert messages[1]["role"] == "assistant"
+    # Assistant message should contain findings or error message
+    assert len(messages[1]["content"]) > 0
