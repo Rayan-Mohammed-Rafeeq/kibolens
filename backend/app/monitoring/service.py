@@ -173,17 +173,31 @@ class MonitoringService:
         for container_id, container_data in containers_by_id.items():
             docker_data = docker_by_id.get(container_id, {})
             observed_at = container_data["observed_at"]
+            metric_available = any(
+                container_id in measurements[name]
+                for name in measurements
+            )
+            direct_docker_stats = any(
+                docker_data.get(name) is not None
+                for name in ("cpu_percent", "memory_bytes")
+            )
+            telemetry_available = metric_available or direct_docker_stats
+            telemetry_observed_at = (
+                datetime.now(UTC) if direct_docker_stats else observed_at
+            )
             output.append(ContainerStatus(
                 id=container_id,
                 name=docker_data.get("name") or container_data["name"],
                 status=docker_data.get("status", "UNKNOWN"),
+                docker_state=docker_data.get("docker_state", docker_data.get("status", "UNKNOWN")),
+                health=docker_data.get("health", "UNKNOWN"),
                 cpu_percent=measurements["cpu_percent"].get(container_id, docker_data.get("cpu_percent")),
                 memory_bytes=measurements["memory_bytes"].get(container_id, docker_data.get("memory_bytes")),
                 network_receive_bytes_per_second=measurements["network_receive_bytes_per_second"].get(container_id),
                 network_transmit_bytes_per_second=measurements["network_transmit_bytes_per_second"].get(container_id),
                 restart_count=docker_data.get("restart_count"),
-                last_observation=observed_at,
-                availability=self._availability(observed_at) if observed_at else "unavailable",
+                last_observation=telemetry_observed_at,
+                availability=("available" if telemetry_available else self._availability(observed_at) if observed_at else "unavailable"),
                 image=docker_data.get("image"), exit_code=docker_data.get("exit_code"),
                 labels=docker_data.get("labels", {}), logs=docker_data.get("logs"),
                 compose_service=docker_data.get("compose_service"),
@@ -196,12 +210,20 @@ class MonitoringService:
         return output
 
     async def vms(self) -> list[VirtualMachineStatus]:
+        items, _, _ = await self.vm_inventory()
+        return items
+
+    async def vm_inventory(self) -> tuple[list[VirtualMachineStatus], str, str | None]:
         if not self.vm_observer:
-            return []
+            return [], "unavailable", "VM monitoring is disabled or the optional libvirt observer is unavailable."
         try:
-            return [VirtualMachineStatus.model_validate(item) for item in await self.vm_observer.list_vms()]
+            items = [VirtualMachineStatus.model_validate(item) for item in await self.vm_observer.list_vms()]
+            observer_error = getattr(self.vm_observer, "last_error", None)
+            if observer_error:
+                return items, "unavailable", observer_error
+            return items, "available", None
         except Exception:
-            return []
+            return [], "unavailable", "VM monitoring is unavailable."
 
     @staticmethod
     def _normalize_container_id(value: object) -> str | None:

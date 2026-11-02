@@ -43,6 +43,12 @@ class VirtualMachineStatus(BaseModel):
     error: str | None = None
 
 
+class VMInventoryResponse(BaseModel):
+    items: list[VirtualMachineStatus] = Field(default_factory=list)
+    availability: MetricAvailability
+    detail: str | None = None
+
+
 class InfrastructureSummary(BaseModel):
     health: HealthAssessment
     metrics: list[MetricReading]
@@ -65,16 +71,12 @@ class MetricHistory(BaseModel):
 
 
 class ContainerStatus(BaseModel):
-    """
-    Container resource usage and status.
-    
-    Note: status field is UNKNOWN because cAdvisor does not expose Docker health-check
-    status or running state. Only resource metrics are available. To obtain true container
-    health status, Docker API integration would be required (future enhancement).
-    """
+    """Canonical Docker container record merged with cAdvisor telemetry."""
     id: str | None
     name: str
     status: Literal["RUNNING", "STOPPED", "RESTARTING", "UNHEALTHY", "UNKNOWN"]
+    docker_state: Literal["RUNNING", "STOPPED", "RESTARTING", "UNKNOWN"] = "UNKNOWN"
+    health: Literal["HEALTHY", "UNHEALTHY", "STARTING", "NO_CHECK", "UNKNOWN"] = "UNKNOWN"
     cpu_percent: float | None
     memory_bytes: float | None
     network_receive_bytes_per_second: float | None

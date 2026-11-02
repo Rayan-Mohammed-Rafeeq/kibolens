@@ -21,6 +21,7 @@ class VMObserver:
         self.uri = uri
         self._previous_cpu: dict[str, tuple[int, float]] = {}
         self._active_since: dict[str, float] = {}
+        self.last_error: str | None = None
 
     @staticmethod
     def _libvirt():
@@ -32,13 +33,16 @@ class VMObserver:
         return libvirt
 
     def _list_sync(self) -> list[dict]:
+        self.last_error = None
         libvirt = self._libvirt()
         if libvirt is None:
+            self.last_error = "Optional libvirt Python binding is unavailable."
             return []
         connection = None
         try:
             connection = libvirt.openReadOnly(self.uri)
             if connection is None:
+                self.last_error = "The host libvirt connection is unavailable."
                 return []
             now = time.monotonic()
             observed_at = datetime.now(timezone.utc)
@@ -50,6 +54,7 @@ class VMObserver:
                     logger.debug("Unable to inspect libvirt domain: %s", exc)
             return output
         except Exception as exc:
+            self.last_error = "The host libvirt connection is unavailable."
             logger.info("libvirt inventory unavailable: %s", type(exc).__name__)
             return []
         finally:

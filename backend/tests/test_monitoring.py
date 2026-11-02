@@ -96,6 +96,7 @@ def test_health_assessment_uses_configured_thresholds() -> None:
 def test_infrastructure_endpoint_requires_authentication(client: TestClient) -> None:
     assert client.get("/api/v1/infrastructure/summary").status_code == 401
     assert client.get("/api/v1/infrastructure/vms").status_code == 401
+    assert client.get("/api/v1/infrastructure/vms/status").status_code == 401
 
 
 def test_alert_webhook_requires_bearer_token_and_correlates_repeats(
@@ -396,3 +397,39 @@ async def test_docker_inventory_is_merged_with_cadvisor_metrics() -> None:
     assert containers[0].memory_bytes == 104857600
     assert containers[0].network_receive_bytes_per_second == 1200
     assert containers[0].restart_count == 2
+
+
+@pytest.mark.anyio
+async def test_container_health_and_direct_metrics_are_distinct() -> None:
+    old_timestamp = (datetime.now(UTC) - timedelta(minutes=10)).timestamp()
+
+    class FakeClient:
+        async def instant_query(self, query: str):
+            if "container_last_seen" in query:
+                return [{"metric": {"id": "container-health"}, "value": [old_timestamp, "1"]}]
+            return []
+
+    class FakeObserver:
+        async def list_containers(self):
+            return [{
+                "id": "container-health",
+                "name": "api",
+                "status": "RUNNING",
+                "docker_state": "RUNNING",
+                "health": "HEALTHY",
+                "compose_service": "api",
+                "cpu_percent": 12.5,
+                "memory_bytes": 2048,
+                "restart_count": 1,
+                "last_observation": datetime.now(UTC) - timedelta(hours=1),
+            }]
+
+    containers = await MonitoringService(FakeClient(), Settings(), FakeObserver()).containers()
+
+    assert len(containers) == 1
+    assert containers[0].status == "RUNNING"
+    assert containers[0].docker_state == "RUNNING"
+    assert containers[0].health == "HEALTHY"
+    assert containers[0].compose_service == "api"
+    assert containers[0].availability == "available"
+    assert containers[0].cpu_percent == 12.5

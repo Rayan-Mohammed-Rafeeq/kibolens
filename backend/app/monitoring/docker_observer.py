@@ -62,10 +62,16 @@ class DockerObserver:
                 attrs = container.attrs or {}
                 state = attrs.get("State", {})
                 health = state.get("Health", {}).get("Status")
-                status = "UNHEALTHY" if health == "unhealthy" else (
+                docker_state = (
                     "RESTARTING" if state.get("Restarting") else
                     "RUNNING" if state.get("Running") else "STOPPED"
                 )
+                health_status = {
+                    "healthy": "HEALTHY",
+                    "unhealthy": "UNHEALTHY",
+                    "starting": "STARTING",
+                }.get(health, "NO_CHECK" if health is None else "UNKNOWN")
+                status = "UNHEALTHY" if health_status == "UNHEALTHY" else docker_state
                 observed = state.get("StartedAt") or state.get("FinishedAt")
                 try:
                     observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00")) if observed else None
@@ -82,6 +88,8 @@ class DockerObserver:
                     "id": container.id,
                     "name": container.name,
                     "status": status,
+                    "docker_state": docker_state,
+                    "health": health_status,
                     "restart_count": int(attrs.get("RestartCount", 0)),
                     "image": (attrs.get("Config", {}).get("Image") or ""),
                     "labels": {k: v for k, v in (attrs.get("Config", {}).get("Labels") or {}).items() if k.startswith("kibolens.") or k.startswith("com.docker.compose.")},
@@ -154,7 +162,7 @@ class DockerObserver:
             labels = container.get("labels", {})
             if labels.get("kibolens.lab") != "true":
                 continue
-            if container["status"] == "UNHEALTHY" or (
+            if container.get("health") == "UNHEALTHY" or (
                 container["status"] == "STOPPED" and container.get("exit_code", 0) != 0
             ) or (container.get("restart_count") or 0) > 0:
                 failures.append(container)

@@ -20,6 +20,7 @@ from app.schemas.monitoring import (
     MetricHistory,
     MonitoringStatus,
     VirtualMachineStatus,
+    VMInventoryResponse,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import and_, select
@@ -71,6 +72,12 @@ async def infrastructure_containers(_: CurrentUser) -> list[ContainerStatus]:
 @router.get("/vms", response_model=list[VirtualMachineStatus])
 async def infrastructure_vms(_: CurrentUser):
     return await monitoring_service().vms()
+
+
+@router.get("/vms/status", response_model=VMInventoryResponse)
+async def infrastructure_vm_status(_: CurrentUser) -> VMInventoryResponse:
+    items, availability, detail = await monitoring_service().vm_inventory()
+    return VMInventoryResponse(items=items, availability=availability, detail=detail)
 
 
 @router.get("/monitoring-status", response_model=MonitoringStatus)
