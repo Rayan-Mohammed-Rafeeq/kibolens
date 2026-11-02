@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.ai.router.core import get_ai_router
-from app.api.dependencies import require_session
+from app.api.dependencies import CsrfSession, CurrentUser, require_session
 from app.core.config import get_settings, Settings
 from app.models.session import UserSession
 
@@ -33,6 +33,7 @@ class AIHealthResponse(BaseModel):
     free_only_mode: bool
     allow_paid_models: bool
     providers: dict
+    generation_verified: bool = False
 
 
 @router.get("/health", response_model=AIHealthResponse)
@@ -54,7 +55,7 @@ async def ai_router_health(
     try:
         ai_router = await get_ai_router(settings)
         health = await ai_router.health_status()
-        return AIHealthResponse(**health)
+        return AIHealthResponse(**health, generation_verified=False)
     except Exception as e:
         logger.exception("AI health check failed: %s", e)
         raise HTTPException(
@@ -88,6 +89,39 @@ class LLMTestResponse(BaseModel):
 
     content: str
     metadata: dict
+
+
+@router.post("/self-test")
+async def ai_self_test(
+    user: CurrentUser,
+    _: CsrfSession,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Administrator-only real provider, LangChain and LangGraph smoke test."""
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required.")
+    try:
+        ai_router = await get_ai_router(settings)
+        providers = await ai_router.provider_diagnostics()
+        from app.ai.langchain_router import CloudRouterChatModel
+        adapter = CloudRouterChatModel(router=ai_router, temperature=0, max_tokens=80)
+        adapter_response = await adapter.ainvoke("Reply exactly: LangChain adapter succeeded.")
+        adapter_ok = bool(str(adapter_response.content).strip())
+        from app.ai.investigator import get_investigator
+        investigator = await get_investigator(settings=settings)
+        graph_result = await investigator.investigate(
+            "Reply with a one-line SRE self-test confirmation.", user_id=user.id
+        )
+        graph_ok = bool(graph_result.get("findings")) and not graph_result.get("error")
+        return {
+            "free_only": settings.ai_free_only and not settings.ai_allow_paid_models,
+            "providers": providers,
+            "langchain": {"succeeded": adapter_ok, "routing": adapter.last_routing_metadata},
+            "langgraph": {"succeeded": graph_ok, "error": graph_result.get("error"), "execution": graph_result.get("evidence", {}).get("execution", {})},
+        }
+    except Exception as exc:
+        logger.exception("AI self-test failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="AI self-test failed at a protected execution stage.") from exc
 
 
 @router.get("/llm/health", response_model=LLMHealthResponse, tags=["llm"])

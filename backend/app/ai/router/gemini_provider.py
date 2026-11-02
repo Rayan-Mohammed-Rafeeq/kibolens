@@ -55,16 +55,21 @@ _GEMINI_TEXT_REGISTRY: list[dict[str, Any]] = [
     # Registry intentionally minimal - dynamic discovery from Google's /models API is primary.
     # Only include models whose current free-tier eligibility is explicitly verified.
     
-    # Current experimental flash (free while in preview - verify via live catalogue)
+    # Current Flash models verified against the live catalogue and free-tier
+    # API smoke test on the configured account. Keep this list explicit because
+    # the Gemini model catalogue does not expose pricing metadata.
     {
-        "model_id": "gemini-flash-exp",
-        "quality_tier": QualityTier.FAST,
-        "priority": 50,
+        "model_id": "gemini-3-flash-preview",
+        "quality_tier": QualityTier.ADVANCED,
+        "priority": 10,
         "context_limit": 1_000_000,
         "capabilities": {AICapability.TEXT_GENERATION},
         "prompt_price_usd": 0.0,
         "completion_price_usd": 0.0,
     },
+    {"model_id": "gemini-3.1-flash-lite", "quality_tier": QualityTier.FAST, "priority": 20, "context_limit": 1_000_000, "capabilities": {AICapability.TEXT_GENERATION}, "prompt_price_usd": 0.0, "completion_price_usd": 0.0},
+    {"model_id": "gemini-3.1-flash-lite-preview", "quality_tier": QualityTier.FAST, "priority": 30, "context_limit": 1_000_000, "capabilities": {AICapability.TEXT_GENERATION}, "prompt_price_usd": 0.0, "completion_price_usd": 0.0},
+    {"model_id": "gemini-flash-lite-latest", "quality_tier": QualityTier.FAST, "priority": 40, "context_limit": 1_000_000, "capabilities": {AICapability.TEXT_GENERATION}, "prompt_price_usd": 0.0, "completion_price_usd": 0.0},
 ]
 
 # ---------------------------------------------------------------------------
@@ -79,16 +84,19 @@ _GEMINI_VISION_REGISTRY: list[dict[str, Any]] = [
     # Registry intentionally minimal - dynamic discovery from Google's /models API is primary.
     # Only include models whose current free-tier eligibility AND vision support are verified.
     
-    # Current experimental flash with vision (free while in preview - verify via live catalogue)
+    # The tested Flash registries are multimodal-capable according to the
+    # live model metadata.
     {
-        "model_id": "gemini-flash-exp",
-        "quality_tier": QualityTier.FAST,
-        "priority": 50,
+        "model_id": "gemini-3-flash-preview",
+        "quality_tier": QualityTier.ADVANCED,
+        "priority": 10,
         "context_limit": 1_000_000,
         "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT},
         "prompt_price_usd": 0.0,
         "completion_price_usd": 0.0,
     },
+    {"model_id": "gemini-3.1-flash-lite", "quality_tier": QualityTier.FAST, "priority": 20, "context_limit": 1_000_000, "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT}, "prompt_price_usd": 0.0, "completion_price_usd": 0.0},
+    {"model_id": "gemini-3.1-flash-lite-preview", "quality_tier": QualityTier.FAST, "priority": 30, "context_limit": 1_000_000, "capabilities": {AICapability.TEXT_GENERATION, AICapability.VISION_INPUT}, "prompt_price_usd": 0.0, "completion_price_usd": 0.0},
 ]
 
 # Canonical embedding model & dimension
@@ -121,11 +129,11 @@ _GEMINI_VERIFIED_FREE_MODEL_IDS = frozenset({
     # MINIMAL REGISTRY - Dynamic discovery from Google's /models API is primary source.
     # Only explicitly verified current free-tier models listed here.
     
-    # Current experimental flash (free while in preview)
-    "gemini-flash-exp",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-flash-lite-latest",
     
-    # Note: gemini-3.x models are FUTURE/HYPOTHETICAL
-    # Do NOT include unless Google confirms free-tier access
 })
 
 

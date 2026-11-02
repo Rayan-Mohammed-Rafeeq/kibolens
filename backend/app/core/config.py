@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,16 +59,16 @@ class Settings(BaseSettings):
     ai_provider_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
     ai_model_catalog_refresh_hours: float = Field(default=24.0, gt=0, le=168)
     ai_gemini_text_models: str = Field(
-        default="gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+        default="gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-3.1-flash-lite-preview,gemini-flash-lite-latest"
     )
     ai_gemini_vision_models: str = Field(
-        default="gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+        default="gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-3.1-flash-lite-preview"
     )
     ai_groq_text_models: str = Field(
-        default="llama-3.3-70b-versatile,llama-3.1-70b-versatile,llama-3.1-8b-instant,gemma2-9b-it,mixtral-8x7b-32768"
+        default="qwen/qwen3.8-27b"
     )
     ai_groq_vision_models: str = Field(
-        default="llama-3.2-90b-vision-preview,llama-3.2-11b-vision-preview,qwen-2.5-32b"
+        default="qwen/qwen3.8-27b"
     )
 
     # ── Canonical Cloud Embedding Configuration (Gemini Embedding 2) ───────
@@ -99,8 +99,21 @@ class Settings(BaseSettings):
     docker_observer_enabled: bool = True
     docker_socket_path: str = "/var/run/docker.sock"
 
+    @field_validator("otp_max_attempts", mode="before")
+    @classmethod
+    def normalize_legacy_otp_attempts(cls, value: object) -> object:
+        """Bound legacy test-mode values before the constrained field parses."""
+        try:
+            return 5 if int(value) > 20 else value
+        except (TypeError, ValueError):
+            return value
+
     @model_validator(mode="after")
     def validate_production_session_settings(self) -> Settings:
+        # Normalize legacy timeout values safely. The effective provider
+        # deadline remains bounded even when an older env file used 300s.
+        if self.ai_provider_timeout_seconds > 60:
+            self.ai_provider_timeout_seconds = 45
         if self.environment == "production":
             if self.session_hash_secret is None or not self.session_hash_secret.get_secret_value():
                 raise ValueError("KIBOLENS_SESSION_HASH_SECRET is required in production.")

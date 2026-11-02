@@ -315,83 +315,97 @@ class AIRouter:
             logger.info("Provider circuit open, skipping: %s", provider.value)
             return 0
 
+        transient_failures = frozenset(
+            {
+                FailureCategory.RATE_LIMITED,
+                FailureCategory.TIMEOUT,
+                FailureCategory.SERVER_ERROR,
+                FailureCategory.MODEL_UNAVAILABLE,
+                FailureCategory.UNKNOWN,
+            }
+        )
+
         for model in models:
+            if not self._circuit_breaker.is_provider_available(provider.value):
+                break
             if not self._is_eligible(model, capability):
                 continue
             if not self._circuit_breaker.is_model_available(provider.value, model.model_id):
                 logger.debug("Model circuit open, skipping: %s/%s", provider.value, model.model_id)
                 continue
 
-            attempt = ModelAttempt(
-                provider=provider,
-                model_id=model.model_id,
-                quality_tier=model.quality_tier,
-                started_at=datetime.now(timezone.utc),
-            )
-
-            t0 = time.monotonic()
-            content, metadata, failure = await self._call_provider(
-                provider=provider,
-                model_id=model.model_id,
-                prompt=prompt,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            attempt.latency_seconds = round(time.monotonic() - t0, 3)
-            attempt.input_tokens = metadata.get("input_tokens")
-            attempt.output_tokens = metadata.get("output_tokens")
-
-            consumed += 1
-
-            if failure is None:
-                attempt.succeeded = True
-                result.attempts.append(attempt)
-                result.successful_provider = provider
-                result.successful_model = model.model_id
-                result.successful_quality_tier = model.quality_tier
-                result.content = content
-                result.input_tokens = metadata.get("input_tokens")
-                result.output_tokens = metadata.get("output_tokens")
-                self._circuit_breaker.record_success(provider.value, model.model_id)
-                logger.info(
-                    "SUCCESS: %s/%s after %d attempts (tier=%s)",
-                    provider.value,
-                    model.model_id,
-                    consumed,
-                    model.quality_tier.value,
+            for retry_num in range(_PER_MODEL_RETRIES + 1):
+                attempt = ModelAttempt(
+                    provider=provider,
+                    model_id=model.model_id,
+                    quality_tier=model.quality_tier,
+                    started_at=datetime.now(timezone.utc),
                 )
-                return consumed
 
-            # Failure
-            attempt.failure_category = failure
-            attempt.failure_detail = f"HTTP call failed with category={failure.value}"
-            result.attempts.append(attempt)
-
-            self._circuit_breaker.record_failure(provider.value, model.model_id, failure)
-
-            # If provider circuit opened or provider-wide issue, stop trying this provider's models
-            if (
-                not self._circuit_breaker.is_provider_available(provider.value)
-                or failure in PROVIDER_WIDE_FAILURE_CATEGORIES
-            ):
-                logger.warning(
-                    "Provider %s unavailable / circuit open; skipping remaining models (after %d attempts)",
-                    provider.value,
-                    consumed,
+                t0 = time.monotonic()
+                content, metadata, failure = await self._call_provider(
+                    provider=provider,
+                    model_id=model.model_id,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
                 )
-                break
+                attempt.latency_seconds = round(time.monotonic() - t0, 3)
+                attempt.input_tokens = metadata.get("input_tokens")
+                attempt.output_tokens = metadata.get("output_tokens")
+                consumed += 1
 
-            # Non-retriable at model level: don't retry, but DO try next model
-            if failure in NON_RETRIABLE_CATEGORIES:
-                if failure == FailureCategory.MODALITY_MISMATCH:
-                    logger.error(
-                        "MODALITY MISMATCH: model %s cannot handle capability %s — "
-                        "check registry configuration",
+                if failure is None and isinstance(content, str) and content.strip():
+                    attempt.succeeded = True
+                    result.attempts.append(attempt)
+                    result.successful_provider = provider
+                    result.successful_model = model.model_id
+                    result.successful_quality_tier = model.quality_tier
+                    result.content = content
+                    result.input_tokens = metadata.get("input_tokens")
+                    result.output_tokens = metadata.get("output_tokens")
+                    self._circuit_breaker.record_success(provider.value, model.model_id)
+                    logger.info(
+                        "SUCCESS: %s/%s after %d attempts (tier=%s)",
+                        provider.value,
                         model.model_id,
-                        capability.value,
+                        consumed,
+                        model.quality_tier.value,
                     )
-                continue
+                    return consumed
+
+                failure = failure or FailureCategory.UNKNOWN
+                attempt.failure_category = failure
+                attempt.failure_detail = f"HTTP call failed with category={failure.value}"
+                result.attempts.append(attempt)
+                self._circuit_breaker.record_failure(provider.value, model.model_id, failure)
+
+                if (
+                    not self._circuit_breaker.is_provider_available(provider.value)
+                    or failure in PROVIDER_WIDE_FAILURE_CATEGORIES
+                ):
+                    logger.warning(
+                        "Provider %s unavailable / circuit open; skipping remaining models (after %d attempts)",
+                        provider.value,
+                        consumed,
+                    )
+                    break
+
+                if failure in NON_RETRIABLE_CATEGORIES:
+                    if failure == FailureCategory.MODALITY_MISMATCH:
+                        logger.error(
+                            "MODALITY MISMATCH: model %s cannot handle capability %s — "
+                            "check registry configuration",
+                            model.model_id,
+                            capability.value,
+                        )
+                    break
+
+                if failure not in transient_failures or retry_num >= _PER_MODEL_RETRIES:
+                    break
+
+                await asyncio.sleep(min(_BACKOFF_BASE * (2 ** retry_num), _BACKOFF_MAX))
 
         # Exhausted all eligible models from this provider
         logger.info(
@@ -561,6 +575,57 @@ class AIRouter:
                 },
             },
         }
+
+    async def provider_diagnostics(self, prompt: str = "Reply exactly: KiboLens AI self-test succeeded.") -> dict:
+        """Run one real, provider-isolated generation test per configured provider.
+
+        The result is safe for an administrator endpoint: it includes counts,
+        model IDs, statuses and failure categories, never credentials or raw
+        authorization data.
+        """
+        diagnostics: dict[str, dict] = {}
+        providers = (
+            (ProviderName.GEMINI, self._gemini, self._gemini.text_models),
+            (ProviderName.GROQ, self._groq, self._groq.text_models),
+            (ProviderName.OPENROUTER, self._openrouter, self._openrouter.text_models),
+        )
+        for provider_name, provider, model_loader in providers:
+            item = {
+                "key_loaded": bool(provider.available),
+                "authentication": False,
+                "catalogue": False,
+                "eligible_model_count": 0,
+                "eligible_models": [],
+                "test_generation": {"succeeded": False, "model": None, "failure_category": None},
+            }
+            if provider.available:
+                item["authentication"] = await provider.health_check()
+                try:
+                    models = [model for model in await model_loader() if self._is_eligible(model, AICapability.TEXT_GENERATION)]
+                    item["catalogue"] = True
+                    item["eligible_model_count"] = len(models)
+                    item["eligible_models"] = [model.model_id for model in models]
+                    for model in models:
+                        content, _, failure = await self._call_provider(
+                            provider=provider_name,
+                            model_id=model.model_id,
+                            prompt=prompt,
+                            system_prompt="You are performing a short provider self-test.",
+                            temperature=0,
+                            max_tokens=80,
+                        )
+                        if failure is None and isinstance(content, str) and content.strip():
+                            item["test_generation"] = {"succeeded": True, "model": model.model_id, "failure_category": None}
+                            break
+                        item["test_generation"] = {
+                            "succeeded": False,
+                            "model": model.model_id,
+                            "failure_category": failure.value if failure else "empty_response",
+                        }
+                except Exception as exc:
+                    item["catalogue_error"] = type(exc).__name__
+            diagnostics[provider_name.value] = item
+        return diagnostics
 
 
 # ═══════════════════════════════════════════════════════════════════════════

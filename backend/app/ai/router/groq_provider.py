@@ -89,9 +89,8 @@ _GROQ_VERIFIED_FREE_MODEL_IDS = frozenset({
     "gemma-7b-it",
     # DeepSeek (free-plan confirmed)
     "deepseek-r1-distill-llama-70b",
-    # Qwen (free-plan confirmed - verify qwen/qwen3.8-27b format via live API)
-    "qwen-2.5-32b",
-    "qwen-3.8-27b",
+    # Qwen (free-plan confirmed by an authenticated generation request)
+    "qwen/qwen3.8-27b",
 })
 
 # Default verified Free-plan candidate models
@@ -104,72 +103,22 @@ _DEFAULT_GROQ_TEXT_MODELS: list[dict[str, Any]] = [
     
     # ADVANCED
     {
-        "model_id": "deepseek-r1-distill-llama-70b",
+        "model_id": "qwen/qwen3.8-27b",
         "quality_tier": QualityTier.ADVANCED,
-        "priority": 18,
+        "priority": 10,
         "context_limit": 131072,
-        "is_preview": True,
+        "is_preview": False,
     },
     # BALANCED
-    {
-        "model_id": "mixtral-8x7b-32768",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 25,
-        "context_limit": 32768,
-        "is_preview": False,
-    },
-    {
-        "model_id": "llama-3.3-70b-specdec",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 28,
-        "context_limit": 8192,
-        "is_preview": True,
-    },
-    # FAST
-    {
-        "model_id": "gemma2-9b-it",
-        "quality_tier": QualityTier.FAST,
-        "priority": 30,
-        "context_limit": 8192,
-        "is_preview": False,
-    },
-    {
-        "model_id": "llama-3.2-3b-preview",
-        "quality_tier": QualityTier.FAST,
-        "priority": 35,
-        "context_limit": 8192,
-        "is_preview": True,
-    },
-    {
-        "model_id": "llama-3.2-1b-preview",
-        "quality_tier": QualityTier.FAST,
-        "priority": 40,
-        "context_limit": 8192,
-        "is_preview": True,
-    },
 ]
 
 _DEFAULT_GROQ_VISION_MODELS: list[dict[str, Any]] = [
     {
-        "model_id": "llama-3.2-90b-vision-preview",
+        "model_id": "qwen/qwen3.8-27b",
         "quality_tier": QualityTier.ADVANCED,
         "priority": 10,
         "context_limit": 131072,
-        "is_preview": True,
-    },
-    {
-        "model_id": "qwen-3.8-27b",
-        "quality_tier": QualityTier.ADVANCED,
-        "priority": 15,
-        "context_limit": 32768,
-        "is_preview": True,
-    },
-    {
-        "model_id": "llama-3.2-11b-vision-preview",
-        "quality_tier": QualityTier.BALANCED,
-        "priority": 20,
-        "context_limit": 131072,
-        "is_preview": True,
+        "is_preview": False,
     },
 ]
 
@@ -363,7 +312,11 @@ class GroqCatalogue:
                     quality_tier = QualityTier.FAST
                     priority = 70
 
-            is_vision = any(v in low_id for v in _VISION_MODEL_SUBSTRINGS)
+            input_modalities = item.get("input_modalities") or []
+            is_vision = (
+                "image" in input_modalities
+                or any(v in low_id for v in _VISION_MODEL_SUBSTRINGS)
+            )
 
             caps = {AICapability.TEXT_GENERATION}
             if is_vision:
@@ -516,7 +469,9 @@ class GroqProvider:
         try:
             data = resp.json()
             choice = data["choices"][0]
-            content = choice["message"]["content"] or ""
+            content = choice["message"].get("content") or ""
+            if not isinstance(content, str) or not content.strip():
+                return "", {}, FailureCategory.UNKNOWN
             finish_reason = choice.get("finish_reason", "")
             usage = data.get("usage", {})
             metadata = {

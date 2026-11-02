@@ -78,7 +78,10 @@ def _classify_openrouter_status(status_code: int, body: str) -> FailureCategory:
         return FailureCategory.QUOTA_EXHAUSTED
     if status_code == 429:
         low = body.lower()
-        if "quota" in low or "limit" in low:
+        # OpenRouter commonly wraps an upstream provider's temporary 429 in a
+        # message containing "rate-limited" or "limit". That is model-level
+        # transient pressure, not account quota exhaustion.
+        if any(marker in low for marker in ("quota exceeded", "daily quota", "credits exhausted", "billing")):
             return FailureCategory.QUOTA_EXHAUSTED
         return FailureCategory.RATE_LIMITED
     if status_code == 400:
@@ -208,6 +211,24 @@ class OpenRouterCatalogue:
         text_entries.sort(key=lambda e: e.priority)
         vision_entries.sort(key=lambda e: e.priority)
 
+        # This is a free-only router endpoint, not a paid model. Expose it as
+        # the final candidate only after the live catalogue proves that the
+        # account has at least one eligible zero-priced text model.
+        if text_entries and not any(entry.model_id == "openrouter/free" for entry in text_entries):
+            text_entries.append(ModelEntry(
+                provider=ProviderName.OPENROUTER,
+                model_id="openrouter/free",
+                capabilities=frozenset({AICapability.TEXT_GENERATION, AICapability.VISION_INPUT}),
+                free_tier=True,
+                status=ModelStatus.ACTIVE,
+                quality_tier=QualityTier.FAST,
+                priority=999,
+                prompt_price_usd=0.0,
+                completion_price_usd=0.0,
+                last_verified_at=datetime.now(timezone.utc),
+                extra={"router_endpoint": True},
+            ))
+
         self._text_models = text_entries
         self._vision_models = vision_entries
         self._fetched_at = time.monotonic()
@@ -309,7 +330,9 @@ class OpenRouterProvider:
 
         try:
             data = resp.json()
-            content = data["choices"][0]["message"]["content"] or ""
+            content = data["choices"][0]["message"].get("content") or ""
+            if not isinstance(content, str) or not content.strip():
+                return "", {}, FailureCategory.UNKNOWN
             finish_reason = data["choices"][0].get("finish_reason", "")
             usage = data.get("usage", {})
             metadata = {

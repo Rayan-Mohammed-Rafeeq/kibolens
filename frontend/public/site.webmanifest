@@ -1,0 +1,12 @@
+{
+  "name": "KiboLens — AI Site Reliability Engineering",
+  "short_name": "KiboLens",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071827",
+  "theme_color": "#071827",
+  "icons": [
+    { "src": "/brand/kibolens-icon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/brand/kibolens-icon.png", "sizes": "256x256", "type": "image/png" }
+  ]
+}
