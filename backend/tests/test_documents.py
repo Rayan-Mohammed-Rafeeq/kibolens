@@ -48,7 +48,7 @@ def test_validate_file_too_large(document_service):
 
 def test_validate_file_unsupported_type(document_service):
     """Test file type validation."""
-    is_valid, error = document_service.validate_file("test.docx", 1024)
+    is_valid, error = document_service.validate_file("test.exe", 1024)
     assert is_valid is False
     assert "unsupported" in error.lower()
 
@@ -76,7 +76,7 @@ def test_extract_text_unsupported_type(document_service):
     file = BytesIO(b"some content")
     
     with pytest.raises(ValueError, match="Unsupported file type"):
-        document_service.extract_text(file, "test.docx")
+        document_service.extract_text(file, "test.exe")
 
 
 def test_chunk_text(document_service):
@@ -183,7 +183,7 @@ async def test_ingest_document_validation_error(document_service):
     with pytest.raises(ValueError, match="Unsupported file type"):
         await document_service.ingest_document(
             file=file,
-            filename="test.docx",
+                filename="test.exe",
             file_size=100,
             user_id=user_id,
         )

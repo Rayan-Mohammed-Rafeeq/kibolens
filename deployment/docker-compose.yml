@@ -40,6 +40,7 @@ services:
       KIBOLENS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-kibolens}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kibolens}
       KIBOLENS_CORS_ORIGINS: '["http://localhost:8080"]'
       KIBOLENS_QDRANT_URL: http://qdrant:6333
+      KIBOLENS_PROMETHEUS_URL: http://prometheus:9090
     volumes:
       - type: bind
         source: /mnt/kiboto-storage/kibolens-data/documents
@@ -47,6 +48,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,6 +72,8 @@ services:
       - kibolens
       - backend_egress
       - rag
+    # Read-only access is consumed only by the allowlisted observer code; the
+    # socket is never returned to the API or browser.
 
   frontend:
     build:
@@ -295,4 +299,3 @@ volumes:
     name: deployment_postgres_data
   prometheus_data:
     driver: local
-

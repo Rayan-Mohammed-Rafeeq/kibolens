@@ -26,3 +26,18 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations: { summary: "Container memory pressure" }
+      - alert: ContainerRepeatedlyRestarting
+        expr: increase(container_restart_count{image!=""}[10m]) > 2
+        for: 2m
+        labels: { severity: high }
+        annotations: { summary: "Container repeatedly restarting" }
+      - alert: BackendUnavailable
+        expr: up{job="backend"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "KiboLens backend unavailable" }
+      - alert: NetworkReceiveAnomaly
+        expr: sum(rate(node_network_receive_bytes_total{device!="lo"}[5m])) == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "No host network receive traffic observed" }

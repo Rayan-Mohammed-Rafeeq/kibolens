@@ -37,6 +37,7 @@ class InvestigationState(TypedDict):
     recommendations: str | None
     error: str | None
     routing_metadata: dict | None
+    conversation_context: str | None
 
 
 class InvestigationFindings(BaseModel):
@@ -407,6 +408,7 @@ class AIInvestigator:
         self,
         question: str,
         user_id: UUID | None = None,
+        conversation_context: str | None = None,
     ) -> dict:
         """Run investigation workflow for a question.
         
@@ -429,6 +431,7 @@ class AIInvestigator:
                 "recommendations": None,
                 "error": None,
                 "routing_metadata": None,
+                "conversation_context": conversation_context,
             }
 
             # Run workflow

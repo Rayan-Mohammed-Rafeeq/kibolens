@@ -26,3 +26,14 @@ def readiness_check(response: Response) -> ReadinessResponse:
         status="ready" if available else "not_ready",
         database="available" if available else "unavailable",
     )
+
+
+@router.get("/metrics", include_in_schema=False)
+def application_metrics() -> Response:
+    """Small internal Prometheus endpoint for backend availability."""
+    return Response(
+        content="# HELP kibolens_backend_up Backend process availability.\n"
+        "# TYPE kibolens_backend_up gauge\n"
+        "kibolens_backend_up 1\n",
+        media_type="text/plain; version=0.0.4",
+    )

@@ -63,6 +63,7 @@ def free_only_settings() -> Settings:
         database_url="sqlite://",
         llm_provider="cloud",
         gemini_api_key="test-gemini-key",  # type: ignore[arg-type]
+        groq_api_key="test-groq-key",  # type: ignore[arg-type]
         openrouter_api_key="test-or-key",   # type: ignore[arg-type]
         ai_free_only=True,
         ai_allow_paid_models=False,

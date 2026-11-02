@@ -3,6 +3,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+from app.schemas.documents import InvestigationResponse
 
 IncidentSeverity = Literal["INFO", "WARNING", "HIGH", "CRITICAL"]
 IncidentStatus = Literal[
@@ -121,3 +122,7 @@ class IncidentSummary(BaseModel):
     recently_resolved_count: int
     oldest_unresolved: IncidentResponse | None
     latest_incidents: list[IncidentResponse]
+
+
+class IncidentInvestigationResponse(InvestigationResponse):
+    conversation_id: UUID

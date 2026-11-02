@@ -19,6 +19,7 @@ from app.schemas.monitoring import (
     MetricHistoryPoint,
     MetricReading,
 )
+from app.monitoring.docker_observer import DockerObserver
 
 SUMMARY_QUERIES = {
     "cpu_utilization": (
@@ -71,9 +72,10 @@ HISTORY_QUERIES = {
 
 
 class MonitoringService:
-    def __init__(self, client: PrometheusClient, settings: Settings) -> None:
+    def __init__(self, client: PrometheusClient, settings: Settings, docker_observer: DockerObserver | None = None) -> None:
         self.client = client
         self.settings = settings
+        self.docker_observer = docker_observer
 
     async def summary(self) -> InfrastructureSummary:
         metrics = [
@@ -121,6 +123,21 @@ class MonitoringService:
         Note: Status remains UNKNOWN as cAdvisor does not expose Docker health-check
         status. Only resource metrics (CPU, memory, network) are available.
         """
+        if self.docker_observer:
+            docker_containers = await self.docker_observer.list_containers()
+            if docker_containers:
+                return [ContainerStatus(
+                    id=item["id"], name=item["name"], status=item["status"],
+                    cpu_percent=None, memory_bytes=None,
+                    network_receive_bytes_per_second=None,
+                    network_transmit_bytes_per_second=None,
+                    restart_count=item.get("restart_count"),
+                    last_observation=item.get("last_observation"),
+                    availability="available" if item.get("last_observation") else "unavailable",
+                    image=item.get("image"), exit_code=item.get("exit_code"),
+                    labels=item.get("labels", {}), logs=item.get("logs"),
+                ) for item in docker_containers]
+
         try:
             # Query all container time series, preserving both id and name for deduplication
             results = await self.client.instant_query(

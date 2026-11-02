@@ -9,6 +9,8 @@ from app.api.routes.investigation import router as investigation_router
 from app.api.routes.ai_router import router as ai_router_health_router
 from app.api.routes.llm import router as llm_router
 from app.api.routes.qdrant import router as qdrant_router
+from app.api.routes.settings import router as settings_router
+from app.api.routes.lab import router as lab_router
 from fastapi import APIRouter
 
 api_router = APIRouter()
@@ -25,3 +27,5 @@ api_router.include_router(llm_router)
 api_router.include_router(qdrant_router)
 api_router.include_router(documents_router)
 api_router.include_router(investigation_router)
+api_router.include_router(settings_router)
+api_router.include_router(lab_router)

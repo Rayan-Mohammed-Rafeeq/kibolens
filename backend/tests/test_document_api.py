@@ -21,7 +21,7 @@ def create_test_session(database):
         database.commit()
         
         token, csrf_token, _ = create_session(database, user, get_settings())
-        return user, token
+        return user, token, csrf_token
     
     return _create
 
@@ -38,7 +38,7 @@ async def test_upload_document_requires_auth(client):
 @pytest.mark.asyncio
 async def test_upload_document_success(client, database, create_test_session):
     """Test successful document upload."""
-    user, token = create_test_session()
+    user, token, csrf_token = create_test_session()
     
     mock_result = {
         "document_id": str(uuid4()),
@@ -57,7 +57,7 @@ async def test_upload_document_success(client, database, create_test_session):
         response = client.post(
             "/api/v1/documents/upload",
             files=files,
-            cookies={"kibolens_session": token},
+            cookies={"kibolens_session": token}, headers={"X-CSRF-Token": csrf_token},
         )
     
     assert response.status_code == status.HTTP_200_OK
@@ -77,7 +77,7 @@ async def test_list_documents_requires_auth(client):
 @pytest.mark.asyncio
 async def test_list_documents_success(client, database, create_test_session):
     """Test successful document listing."""
-    user, token = create_test_session()
+    user, token, csrf_token = create_test_session()
     
     mock_documents = [
         {
@@ -97,7 +97,7 @@ async def test_list_documents_success(client, database, create_test_session):
         
         response = client.get(
             "/api/v1/documents/list",
-            cookies={"kibolens_session": token},
+            cookies={"kibolens_session": token}, headers={"X-CSRF-Token": csrf_token},
         )
     
     assert response.status_code == status.HTTP_200_OK
@@ -117,7 +117,7 @@ async def test_delete_document_requires_auth(client):
 @pytest.mark.asyncio
 async def test_delete_document_success(client, database, create_test_session):
     """Test successful document deletion."""
-    user, token = create_test_session()
+    user, token, csrf_token = create_test_session()
     
     document_id = str(uuid4())
     
@@ -128,7 +128,7 @@ async def test_delete_document_success(client, database, create_test_session):
         
         response = client.delete(
             f"/api/v1/documents/{document_id}",
-            cookies={"kibolens_session": token},
+            cookies={"kibolens_session": token}, headers={"X-CSRF-Token": csrf_token},
         )
     
     assert response.status_code == status.HTTP_200_OK
@@ -151,7 +151,7 @@ async def test_search_documents_requires_auth(client):
 @pytest.mark.asyncio
 async def test_search_documents_success(client, database, create_test_session):
     """Test successful document search."""
-    user, token = create_test_session()
+    user, token, csrf_token = create_test_session()
     
     mock_results = [
         {
@@ -172,7 +172,7 @@ async def test_search_documents_success(client, database, create_test_session):
         response = client.post(
             "/api/v1/documents/search",
             json={"query": "test query", "limit": 5},
-            cookies={"kibolens_session": token},
+            cookies={"kibolens_session": token}, headers={"X-CSRF-Token": csrf_token},
         )
     
     assert response.status_code == status.HTTP_200_OK

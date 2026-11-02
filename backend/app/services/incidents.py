@@ -393,6 +393,7 @@ class IncidentService:
         """
         fingerprint = alert.fingerprint
         now = datetime.now(UTC)
+        alert_source = "docker_lab" if alert.labels.get("kibolens_lab") == "true" else "alertmanager"
 
         # Extract alert information
         title = alert.annotations.get("summary", alert.labels.get("alertname", "Unknown Alert"))
@@ -417,6 +418,8 @@ class IncidentService:
         if alert.status == "firing":
             if existing:
                 # Update existing incident
+                if now <= existing.last_observed_at:
+                    now = existing.last_observed_at + timedelta(microseconds=1)
                 existing.last_observed_at = now
                 existing.updated_at = now
 
@@ -428,7 +431,7 @@ class IncidentService:
                         incident_id=existing.id,
                         event_type="SEVERITY_CHANGED",
                         description=f"Alert severity changed from {old_severity} to {severity}",
-                        source="alertmanager",
+                        source=alert_source,
                         metadata={"previous_severity": old_severity, "new_severity": severity},
                     )
 
@@ -436,7 +439,7 @@ class IncidentService:
                     incident_id=existing.id,
                     event_type="ALERT_REPEATED",
                     description=f"Alert repeated: {title}",
-                    source="alertmanager",
+                    source=alert_source,
                     metadata={"labels": alert.labels, "annotations": alert.annotations},
                 )
 
@@ -460,7 +463,7 @@ class IncidentService:
                     incident = self.reopen_incident(
                         recently_resolved.id,
                         note="Alert fired again after resolution",
-                        source="alertmanager",
+                        source=alert_source,
                     )
                     incident.last_observed_at = now
 
@@ -468,7 +471,7 @@ class IncidentService:
                         incident_id=incident.id,
                         event_type="ALERT_RECEIVED",
                         description=f"Recurrent alert: {title}",
-                        source="alertmanager",
+                        source=alert_source,
                         metadata={"labels": alert.labels, "annotations": alert.annotations},
                     )
                 else:
@@ -477,7 +480,7 @@ class IncidentService:
                         title=title,
                         description=description,
                         severity=severity,
-                        source="alertmanager",
+                        source=alert_source,
                         alert_fingerprint=fingerprint,
                         affected_host=affected_host,
                         affected_service=affected_service,
@@ -488,7 +491,7 @@ class IncidentService:
                         incident_id=incident.id,
                         event_type="ALERT_RECEIVED",
                         description=f"Alert received: {title}",
-                        source="alertmanager",
+                        source=alert_source,
                         metadata={"labels": alert.labels, "annotations": alert.annotations},
                     )
 
@@ -503,7 +506,7 @@ class IncidentService:
                     self.resolve_incident(
                         existing.id,
                         note="Alert resolved by Alertmanager",
-                        source="alertmanager",
+                        source=alert_source,
                     )
                 except ValueError:
                     # Already resolved or invalid transition
@@ -518,7 +521,7 @@ class IncidentService:
                     title=title,
                     description=f"Resolved alert (no prior firing alert recorded): {description}",
                     severity=severity,
-                    source="alertmanager",
+                    source=alert_source,
                     alert_fingerprint=fingerprint,
                     affected_host=affected_host,
                     affected_service=affected_service,
@@ -527,7 +530,7 @@ class IncidentService:
                 self.resolve_incident(
                     incident.id,
                     note="Alert was already resolved when first seen",
-                    source="alertmanager",
+                    source=alert_source,
                 )
 
         self.db.flush()
@@ -566,49 +569,8 @@ class IncidentService:
                 },
             )
 
-            # Collect current infrastructure metrics
-            summary_result = self.monitoring_service.summary()
-            if summary_result.monitoring_available:
-                for metric in summary_result.metrics:
-                    if metric.value is not None and metric.availability == "available":
-                        self.capture_evidence(
-                            incident_id=incident.id,
-                            evidence_type="HOST_METRIC",
-                            source="prometheus",
-                            metric_name=metric.name,
-                            metric_value=metric.value,
-                            unit=metric.unit,
-                            observed_at=metric.observation_at,
-                        )
-
-            # Collect container state if affected service is known
-            if incident.affected_service:
-                containers = self.monitoring_service.containers()
-                for container in containers:
-                    if container.availability == "available" and (
-                        container.name == incident.affected_service
-                        or incident.affected_service in container.name
-                    ):
-                        self.capture_evidence(
-                            incident_id=incident.id,
-                            evidence_type="CONTAINER_STATE",
-                            source="prometheus",
-                            resource_identifier=container.name,
-                            metadata={
-                                "status": container.status,
-                                "cpu_percent": container.cpu_percent,
-                                "memory_bytes": container.memory_bytes,
-                                "restart_count": container.restart_count,
-                            },
-                            observed_at=container.last_observation,
-                        )
-
-            self.record_incident_event(
-                incident_id=incident.id,
-                event_type="EVIDENCE_CAPTURED",
-                description="Infrastructure telemetry evidence collected",
-                source="system",
-            )
+            # Prometheus and Docker collection are asynchronous. The webhook
+            # awaits collect_incident_evidence() after alert correlation.
 
         except Exception as e:
             logger.error(f"Evidence collection failed for incident {incident.id}: {e}")
@@ -620,6 +582,50 @@ class IncidentService:
                 source="system",
                 metadata={"error": str(e), "success": False},
             )
+
+    async def collect_incident_evidence(self, incident: Incident) -> None:
+        """Collect live Prometheus and Docker evidence after alert ingestion."""
+        if not self.monitoring_service:
+            return
+        try:
+            summary_result = await self.monitoring_service.summary()
+            if summary_result.monitoring_available:
+                for metric in summary_result.metrics:
+                    if metric.value is not None and metric.availability == "available":
+                        self.capture_evidence(
+                            incident_id=incident.id, evidence_type="HOST_METRIC",
+                            source="prometheus", metric_name=metric.name,
+                            metric_value=metric.value, unit=metric.unit,
+                            observed_at=metric.observation_at,
+                        )
+            if incident.affected_service:
+                containers = await self.monitoring_service.containers()
+                for container in containers:
+                    if container.availability == "available" and (
+                        container.name == incident.affected_service
+                        or incident.affected_service in container.name
+                    ):
+                        self.capture_evidence(
+                            incident_id=incident.id, evidence_type="CONTAINER_STATE",
+                            source="docker", resource_identifier=container.name,
+                            metadata={
+                                "status": container.status,
+                                "cpu_percent": container.cpu_percent,
+                                "memory_bytes": container.memory_bytes,
+                                "restart_count": container.restart_count,
+                                "exit_code": container.exit_code,
+                                "logs": container.logs,
+                                "labels": container.labels,
+                            }, observed_at=container.last_observation,
+                        )
+            self.record_incident_event(
+                incident_id=incident.id, event_type="EVIDENCE_CAPTURED",
+                description="Infrastructure telemetry evidence collected",
+                source="system",
+            )
+            self.db.flush()
+        except Exception as exc:
+            logger.warning("Live incident evidence collection failed: %s", exc)
 
     def get_incident_summary(self) -> dict:
         """Get summary statistics for incident dashboard."""

@@ -53,6 +53,8 @@ class InvestigationState(TypedDict):
     error: str | None
     # Routing metadata injected by the cloud investigator
     routing_metadata: dict | None
+    user_id: UUID | None
+    conversation_context: str | None
 
 
 class InvestigationFindings(BaseModel):
@@ -207,8 +209,26 @@ class CloudAIInvestigator:
             state["document_context"] = None
             return state
         try:
-            state["document_context"] = "Document search not available in this context."
-            logger.info("Document gathering skipped (requires user context)")
+            if state.get("user_id") is None:
+                state["document_context"] = None
+                logger.info("Document gathering skipped because no authenticated owner was supplied")
+                return state
+            results = await self.document_service.search_documents(
+                query=state["question"],
+                user_id=state["user_id"],
+                limit=5,
+            )
+            if not results:
+                state["document_context"] = None
+                return state
+            excerpts = []
+            for result in results:
+                excerpts.append(
+                    f"[{result['filename']} · chunk {result['chunk_index']} · "
+                    f"score {result['score']:.3f}]\n{result['text']}"
+                )
+            state["document_context"] = "\n\n".join(excerpts)
+            logger.info("Retrieved %d knowledge-base chunks", len(results))
         except Exception as e:
             logger.warning("Failed to gather documents: %s", e)
             state["document_context"] = None
@@ -240,6 +260,10 @@ class CloudAIInvestigator:
             if state.get("document_context"):
                 context_parts.extend(["DOCUMENTATION:", state["document_context"], ""])
                 data_sources.append("Knowledge Base Documents")
+
+            if state.get("conversation_context"):
+                context_parts.extend(["PREVIOUS CONVERSATION:", state["conversation_context"], ""])
+                data_sources.append("Conversation History")
 
             if not data_sources:
                 context_parts.append(
@@ -342,6 +366,7 @@ class CloudAIInvestigator:
         self,
         question: str,
         user_id: UUID | None = None,
+        conversation_context: str | None = None,
     ) -> dict:
         """Run investigation workflow.
 
@@ -359,6 +384,8 @@ class CloudAIInvestigator:
                 "recommendations": None,
                 "error": None,
                 "routing_metadata": None,
+                "user_id": user_id,
+                "conversation_context": conversation_context,
             }
 
             final_state = await self.graph.ainvoke(initial_state)

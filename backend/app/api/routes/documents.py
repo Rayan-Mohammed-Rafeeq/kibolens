@@ -8,8 +8,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.ai.cloud_embeddings import CloudEmbeddingService
 from app.ai.embeddings import get_embedding_service
-from app.api.dependencies import get_db, require_session
+from app.api.dependencies import CsrfSession, get_db, require_session
 from app.core.config import get_settings, Settings
 from app.models.session import UserSession
 from app.schemas.documents import (
@@ -40,12 +41,19 @@ def get_document_service(
         DocumentService instance
     """
     qdrant_service = get_qdrant_service(settings)
-    embedding_service = get_embedding_service(settings)
+    # Cloud mode must use the canonical Gemini embedding space. Ollama is a
+    # deliberate rollback path only and must never be contacted in cloud mode.
+    embedding_service = (
+        CloudEmbeddingService(settings)
+        if settings.llm_provider.lower() == "cloud"
+        else get_embedding_service(settings)
+    )
     return DocumentService(qdrant_service, embedding_service)
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
+    _: CsrfSession,
     file: UploadFile = File(...),
     session: UserSession = Depends(require_session),
     document_service: DocumentService = Depends(get_document_service),
@@ -144,6 +152,7 @@ async def list_documents(
 @router.delete("/{document_id}", response_model=DocumentDeleteResponse)
 async def delete_document(
     document_id: str,
+    _: CsrfSession,
     session: UserSession = Depends(require_session),
     document_service: DocumentService = Depends(get_document_service),
 ):
@@ -191,6 +200,7 @@ async def delete_document(
 @router.post("/search", response_model=DocumentSearchResponse)
 async def search_documents(
     request: DocumentSearchRequest,
+    _: CsrfSession,
     session: UserSession = Depends(require_session),
     document_service: DocumentService = Depends(get_document_service),
 ):

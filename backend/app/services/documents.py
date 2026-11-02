@@ -33,12 +33,16 @@ logger = logging.getLogger(__name__)
 MAX_FILE_SIZE_MB = 10
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
-ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown"}
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".txt", ".md", ".markdown", ".docx", ".dockerfile", ".yml", ".yaml",
+    ".compose", ".log", ".conf",
+}
 ALLOWED_MIME_TYPES = {
     "application/pdf",
     "text/plain",
     "text/markdown",
 }
+SECRET_MARKERS = ("password", "secret", "api_key", "token", "private_key", "credential")
 
 # Chunking configuration
 CHUNK_SIZE = 1000  # characters
@@ -149,7 +153,10 @@ class DocumentService:
 
         # Check file extension
         file_path = Path(filename)
-        if file_path.suffix.lower() not in ALLOWED_EXTENSIONS:
+        extension = file_path.suffix.lower() or (
+            ".dockerfile" if file_path.name.lower() == "dockerfile" else ""
+        )
+        if extension not in ALLOWED_EXTENSIONS:
             allowed = ", ".join(ALLOWED_EXTENSIONS)
             return False, f"Unsupported file type. Allowed: {allowed}"
 
@@ -168,13 +175,18 @@ class DocumentService:
         Raises:
             ValueError: If file type is not supported or extraction fails
         """
-        file_ext = Path(filename).suffix.lower()
+        file_path = Path(filename)
+        file_ext = file_path.suffix.lower() or (
+            ".dockerfile" if file_path.name.lower() == "dockerfile" else ""
+        )
 
         try:
             if file_ext == ".pdf":
                 return self._extract_pdf(file)
-            elif file_ext in {".txt", ".md", ".markdown"}:
+            elif file_ext in {".txt", ".md", ".markdown", ".dockerfile", ".yml", ".yaml", ".compose", ".log", ".conf"}:
                 return self._extract_text_file(file)
+            elif file_ext == ".docx":
+                return self._extract_docx(file)
             else:
                 raise ValueError(f"Unsupported file type: {file_ext}")
 
@@ -214,9 +226,38 @@ class DocumentService:
         
         # Try UTF-8 first, fall back to latin-1
         try:
-            return content.decode("utf-8")
+            text = content.decode("utf-8")
         except UnicodeDecodeError:
-            return content.decode("latin-1")
+            text = content.decode("latin-1")
+        return self._redact_secrets(text)
+
+    def _extract_docx(self, file: BinaryIO) -> str:
+        """Extract paragraph text without executing or trusting document macros."""
+        from zipfile import ZipFile
+        from xml.etree import ElementTree
+
+        with ZipFile(file) as archive:
+            xml = archive.read("word/document.xml")
+        root = ElementTree.fromstring(xml)
+        text = "\n".join(
+            node.text or ""
+            for node in root.iter()
+            if node.tag.rsplit("}", 1)[-1] == "t"
+        )
+        return self._redact_secrets(text)
+
+    def _redact_secrets(self, text: str) -> str:
+        import re
+
+        lines = []
+        for line in text.splitlines():
+            lowered = line.lower()
+            if any(marker in lowered for marker in SECRET_MARKERS) and ("=" in line or ":" in line):
+                key = re.split(r"[:=]", line, maxsplit=1)[0].strip()
+                lines.append(f"{key}: [REDACTED]")
+            else:
+                lines.append(line)
+        return "\n".join(lines)
 
     def chunk_text(self, text: str) -> list[str]:
         """Split text into overlapping chunks for embedding.

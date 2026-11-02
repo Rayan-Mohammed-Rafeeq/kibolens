@@ -17,6 +17,7 @@ class ConversationResponse(BaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
+    incident_id: str | None = None
 
 
 class ConversationListResponse(BaseModel):

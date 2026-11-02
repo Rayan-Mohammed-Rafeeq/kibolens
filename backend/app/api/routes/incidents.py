@@ -3,7 +3,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import CurrentUser, get_db
+from app.api.dependencies import CsrfSession, CurrentUser, get_db
+from app.ai.cloud_embeddings import CloudEmbeddingService
+from app.ai.investigator import get_investigator
 from app.monitoring.prometheus import PrometheusClient
 from app.monitoring.service import MonitoringService
 from app.schemas.incident import (
@@ -18,7 +20,12 @@ from app.schemas.incident import (
     IncidentStatus,
     IncidentStatusUpdate,
     IncidentSummary,
+    IncidentInvestigationResponse,
 )
+from app.schemas.conversation import MessageCreate
+from app.services import conversations
+from app.services.documents import DocumentService
+from app.services.qdrant import get_qdrant_service
 from app.services.incidents import IncidentService
 from app.core.config import get_settings
 
@@ -143,11 +150,60 @@ async def get_incident_evidence(
     return [EvidenceRecordResponse.model_validate(ev) for ev in evidence]
 
 
+@router.post("/{incident_id}/investigate", response_model=IncidentInvestigationResponse)
+async def investigate_incident(
+    incident_id: UUID,
+    payload: MessageCreate,
+    user: CurrentUser,
+    _: CsrfSession,
+    db: Session = Depends(get_db),
+    service: IncidentService = Depends(get_incident_service),
+) -> IncidentInvestigationResponse:
+    """Investigate an incident with its persisted timeline and evidence."""
+    incident = service.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    settings = get_settings()
+    conversation = conversations.create_conversation(
+        db, user.id, f"Investigation · {incident.incident_number}"
+    )
+    conversation.incident_id = incident.id
+    conversations.add_user_message(db, conversation, payload.content)
+    timeline = service.get_incident_timeline(incident.id)
+    evidence = service.get_incident_evidence(incident.id)
+    context = "\n".join([
+        f"Incident: {incident.incident_number} | {incident.title} | severity={incident.severity} | status={incident.status}",
+        incident.description,
+        "Timeline:",
+        *[f"{event.created_at.isoformat()} {event.event_type}: {event.description}" for event in timeline],
+        "Evidence:",
+        *[f"{item.evidence_type} {item.metric_name or item.resource_identifier or ''}: {item.evidence_metadata or item.metric_value}" for item in evidence],
+    ])
+    investigator = await get_investigator(
+        settings=settings,
+        document_service=DocumentService(get_qdrant_service(settings), CloudEmbeddingService(settings)),
+        incident_service=service,
+        prometheus_client=PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
+    )
+    result = await investigator.investigate(
+        question=payload.content,
+        user_id=user.id,
+        conversation_context=context,
+    )
+    assistant_content = result.get("findings") or f"Investigation could not be completed: {result.get('error', 'No provider response was available.')}"
+    conversations.add_assistant_message(db, conversation, assistant_content)
+    service.add_note(incident.id, f"AI investigation conversation created: {conversation.id}", source="ai")
+    db.commit()
+    return IncidentInvestigationResponse(**result, conversation_id=conversation.id)
+
+
 @router.patch("/{incident_id}/status", response_model=IncidentResponse)
 async def update_incident_status(
     incident_id: UUID,
     update: IncidentStatusUpdate,
     _: CurrentUser,
+    csrf: CsrfSession,
     service: IncidentService = Depends(get_incident_service),
 ) -> IncidentResponse:
     """
@@ -179,6 +235,7 @@ async def update_incident_severity(
     incident_id: UUID,
     update: IncidentSeverityUpdate,
     _: CurrentUser,
+    csrf: CsrfSession,
     service: IncidentService = Depends(get_incident_service),
 ) -> IncidentResponse:
     """Update incident severity level."""
@@ -200,6 +257,7 @@ async def add_incident_note(
     incident_id: UUID,
     note: IncidentNote,
     _: CurrentUser,
+    csrf: CsrfSession,
     service: IncidentService = Depends(get_incident_service),
 ) -> IncidentEventResponse:
     """Add a note to incident timeline."""

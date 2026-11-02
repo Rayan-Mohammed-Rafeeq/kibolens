@@ -52,7 +52,7 @@ async def investigate_issue(
         investigator = await get_investigator(
             settings=settings,
             document_service=document_service,
-            incident_service=None,  # TODO: Add incident context with proper DB session
+            incident_service=None,  # The general question endpoint has no incident identifier.
             prometheus_client=prometheus_client,
         )
 

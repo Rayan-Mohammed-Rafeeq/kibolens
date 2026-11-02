@@ -69,10 +69,9 @@ from app.core.config import Settings
 logger = logging.getLogger(__name__)
 
 # Exponential backoff for retries within the same model (only for transient errors)
-# TESTING MODE: Backoff disabled, more retries allowed
-_BACKOFF_BASE = 0.0  # DISABLED - No wait between retries
-_BACKOFF_MAX = 0.0  # DISABLED - No backoff delay
-_PER_MODEL_RETRIES = 10  # INCREASED - 10 additional retries per model
+_BACKOFF_BASE = 0.25
+_BACKOFF_MAX = 2.0
+_PER_MODEL_RETRIES = 1
 
 
 class AIRouter:

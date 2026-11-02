@@ -8,7 +8,9 @@ KiboLens is a self-hosted, evidence-first infrastructure observability and inves
 
 **Phase 4.1 - OTP Authentication (Complete):** Production-ready two-administrator email authentication with mandatory OTP verification via Resend. Both approved administrator emails (rayanmohammedrafeeq@gmail.com, rakinmohammedrafeeq@gmail.com) are supported. Email + password authentication sends a 6-digit OTP; only successful OTP verification establishes an authenticated session. Includes multi-admin provisioning CLI, HMAC-based OTP storage, resend cooldown, attempt limits, and comprehensive test coverage (70 tests pass). See `docs/OTP_DEPLOYMENT_GUIDE.md` for configuration and deployment.
 
-**Phase 4 - Incident Management (Complete):** Complete incident management subsystem. Alertmanager webhooks automatically create and update incidents with full event timelines and evidence capture. The backend API provides filtering, pagination, and state management with a documented transition policy. Frontend UI components are pending.
+**Incident Management:** Alertmanager webhooks automatically create and update incidents with event timelines, evidence capture, lifecycle controls and linked AI investigations. Synthetic Failure Lab incidents are labeled separately and have administrator-only reset controls.
+
+Knowledge Base and Settings are authenticated, functional application pages. See `docs/INTERVIEW_DEMO.md` for a reproducible demonstration.
 
 ## Quick start
 

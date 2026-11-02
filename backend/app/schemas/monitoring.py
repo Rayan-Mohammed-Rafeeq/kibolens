@@ -57,9 +57,13 @@ class ContainerStatus(BaseModel):
     memory_bytes: float | None
     network_receive_bytes_per_second: float | None
     network_transmit_bytes_per_second: float | None
-    restart_count: int | None = None
     last_observation: datetime | None
     availability: MetricAvailability
+    image: str | None = None
+    restart_count: int | None = None
+    exit_code: int | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    logs: str | None = None
 
 
 class MonitoringStatus(BaseModel):

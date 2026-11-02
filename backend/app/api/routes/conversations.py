@@ -32,6 +32,7 @@ def conversation_response(conversation) -> ConversationResponse:
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
+        incident_id=str(conversation.incident_id) if conversation.incident_id else None,
     )
 
 
@@ -164,7 +165,11 @@ async def investigate_and_respond(
     5. Returns the investigation response with routing metadata
     """
     conversation = owned_conversation(database, user, conversation_id)
-    
+    previous_messages = conversations.list_messages(database, conversation.id, 0, 12)
+    conversation_context = "\n".join(
+        f"{message.role.upper()}: {message.content}" for message in previous_messages
+    )
+
     # Add user message
     conversations.add_user_message(database, conversation, payload.content)
     
@@ -191,6 +196,7 @@ async def investigate_and_respond(
         result = await investigator.investigate(
             question=payload.content,
             user_id=user.id,
+            conversation_context=conversation_context,
         )
         
         # Determine what to persist as assistant message

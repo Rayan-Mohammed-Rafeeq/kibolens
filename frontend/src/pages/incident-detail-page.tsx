@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, AlertTriangle, ArrowLeft, Clock, Info, Server } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { incidentsService } from "../services/incidents";
 import type { IncidentSeverity, IncidentStatus } from "../types/incident";
 import { formatTimestamp, getSeverityColor, getStatusColor } from "../utils/incident";
@@ -18,9 +18,11 @@ const VALID_TRANSITIONS: Record<IncidentStatus, IncidentStatus[]> = {
 export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [note, setNote] = useState("");
   const [newStatus, setNewStatus] = useState<IncidentStatus | "">("");
   const [newSeverity, setNewSeverity] = useState<IncidentSeverity | "">("");
+  const [investigationQuestion, setInvestigationQuestion] = useState("What caused this incident and how should recovery be verified?");
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["incident", id],
@@ -59,6 +61,10 @@ export function IncidentDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["incident", id] });
       setNote("");
     },
+  });
+  const investigateMutation = useMutation({
+    mutationFn: () => incidentsService.investigate(id!, investigationQuestion),
+    onSuccess: (result) => navigate(`/chat?conversation=${result.conversation_id}`),
   });
 
   if (isLoading) {
@@ -163,6 +169,12 @@ export function IncidentDetailPage() {
       {/* Actions */}
       <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
         <h2 className="font-medium">Actions</h2>
+        <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-4">
+          <label className="block text-sm text-zinc-300">Investigate with AI</label>
+          <div className="mt-2 flex gap-2"><input value={investigationQuestion} onChange={(event) => setInvestigationQuestion(event.target.value)} className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm" /><button onClick={() => investigateMutation.mutate()} disabled={investigateMutation.isPending || !investigationQuestion.trim()} className="rounded-md bg-cyan-400 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-50">{investigateMutation.isPending ? "Investigating…" : "Investigate"}</button></div>
+          {investigateMutation.isError && <p className="mt-2 text-sm text-red-300">{(investigateMutation.error as Error).message}</p>}
+          <p className="mt-2 text-xs text-zinc-500">The investigation uses this incident's timeline, evidence, telemetry and indexed documentation. Recommendations are not executed automatically.</p>
+        </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {/* Update Status */}
           <div>

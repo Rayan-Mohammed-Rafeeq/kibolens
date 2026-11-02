@@ -9,6 +9,7 @@ from app.api.dependencies import CurrentUser, get_db
 from app.core.config import get_settings
 from app.monitoring.alerts import AlertDeduplicator
 from app.monitoring.prometheus import PrometheusClient
+from app.monitoring.docker_observer import DockerObserver
 from app.monitoring.service import MonitoringService
 from app.schemas.monitoring import (
     AlertmanagerWebhook,
@@ -29,7 +30,9 @@ deduplicator = AlertDeduplicator()
 def monitoring_service() -> MonitoringService:
     settings = get_settings()
     return MonitoringService(
-        PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds), settings
+        PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
+        settings,
+        DockerObserver(settings.docker_socket_path) if settings.docker_observer_enabled else None,
     )
 
 
@@ -109,7 +112,8 @@ async def alertmanager_webhook(
         # Use deduplicator for idempotency within this request
         if deduplicator.accept(alert.fingerprint):
             try:
-                incident_service.process_alert(alert)
+                incident = incident_service.process_alert(alert)
+                await incident_service.collect_incident_evidence(incident)
                 processed += 1
             except Exception as e:
                 # Log error but continue processing other alerts

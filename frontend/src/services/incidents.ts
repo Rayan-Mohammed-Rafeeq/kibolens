@@ -55,4 +55,9 @@ export const incidentsService = {
       method: "POST",
       body: JSON.stringify({ note }),
     }),
+  investigate: (id: string, question: string) =>
+    apiRequest<{ conversation_id: string; findings: string | null; error: string | null }>(`/incidents/${id}/investigate`, {
+      method: "POST",
+      body: JSON.stringify({ content: question }),
+    }),
 };

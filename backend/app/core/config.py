@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     session_cookie_name: str = "kibolens_session"
     session_cookie_secure: bool = False
     session_ttl_hours: int = Field(default=12, ge=1, le=168)
-    login_max_attempts: int = Field(default=999999, ge=1, le=999999)  # DISABLED for testing
+    login_max_attempts: int = Field(default=5, ge=1, le=100)
     prometheus_url: str = "http://localhost:9090"
     prometheus_timeout_seconds: float = Field(default=5, gt=0, le=30)
     monitoring_stale_seconds: int = Field(default=120, ge=15, le=900)
@@ -39,10 +39,10 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="cloud")  # "cloud" | "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
-    ollama_timeout_seconds: float = Field(default=300, gt=0, le=300)  # DISABLED - Max timeout
+    ollama_timeout_seconds: float = Field(default=30, gt=0, le=300)
     llm_temperature: float = Field(default=0.1, ge=0, le=1)
     llm_max_tokens: int = Field(default=2000, ge=100, le=32000)
-    llm_request_timeout_seconds: float = Field(default=600, gt=0, le=600)  # DISABLED - Max timeout
+    llm_request_timeout_seconds: float = Field(default=45, gt=0, le=600)
 
     # ── Cloud AI Provider Keys ──────────────────────────────────────────────
     # Stored as SecretStr so they are never logged or serialised in plain text.
@@ -55,11 +55,8 @@ class Settings(BaseSettings):
     ai_allow_paid_models: bool = Field(default=False)
 
     # ── Routing Parameters ──────────────────────────────────────────────────
-    # TESTING MODE: All limits DISABLED for uninterrupted testing
-    # - Timeouts set to maximum (300s = 5 minutes)
-    # - No artificial model attempt limits
-    # - Operational safeguards still active but with generous limits
-    ai_provider_timeout_seconds: float = Field(default=300.0, gt=0, le=300)  # DISABLED - Max timeout
+    # Operational safeguards are bounded; this is not an AI usage quota.
+    ai_provider_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
     ai_model_catalog_refresh_hours: float = Field(default=24.0, gt=0, le=168)
     ai_gemini_text_models: str = Field(
         default="gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
@@ -95,8 +92,12 @@ class Settings(BaseSettings):
     )
     otp_hash_secret: SecretStr = Field(default=SecretStr("change-me-otp-secret"))
     otp_ttl_seconds: int = Field(default=300, ge=60, le=600)
-    otp_resend_cooldown_seconds: int = Field(default=1, ge=1, le=300)  # DISABLED for testing - 1 second
-    otp_max_attempts: int = Field(default=999999, ge=3, le=999999)  # DISABLED for testing
+    otp_resend_cooldown_seconds: int = Field(default=30, ge=1, le=300)
+    otp_max_attempts: int = Field(default=5, ge=3, le=20)
+
+    # Docker inspection is optional and only uses the local Engine API socket.
+    docker_observer_enabled: bool = True
+    docker_socket_path: str = "/var/run/docker.sock"
 
     @model_validator(mode="after")
     def validate_production_session_settings(self) -> Settings:

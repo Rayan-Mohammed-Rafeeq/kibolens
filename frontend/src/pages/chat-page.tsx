@@ -1,5 +1,6 @@
 import { MoreHorizontal, Plus, Send, Sparkles, Trash2, AlertCircle } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { conversationService } from "../services/conversations";
 import type { Conversation } from "../types/conversations";
@@ -7,6 +8,7 @@ import { MarkdownRenderer } from "../components/markdown-renderer";
 
 export function ChatPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [investigationError, setInvestigationError] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function ChatPage() {
     }
   });
 
-  useEffect(() => { if (!selectedId && conversations.data?.items[0]) setSelectedId(conversations.data.items[0].id); }, [conversations.data, selectedId]);
+  useEffect(() => { const requested = searchParams.get("conversation"); if (!selectedId && requested && conversations.data?.items.some((item) => item.id === requested)) setSelectedId(requested); else if (!selectedId && conversations.data?.items[0]) setSelectedId(conversations.data.items[0].id); }, [conversations.data, selectedId, searchParams]);
   
   async function submit(event: FormEvent<HTMLFormElement>) { 
     event.preventDefault(); 
