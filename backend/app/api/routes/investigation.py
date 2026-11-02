@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.ai.embeddings import get_embedding_service
+from app.ai.cloud_embeddings import CloudEmbeddingService
 from app.ai.investigator import get_investigator
 from app.api.dependencies import require_session
 from app.core.config import get_settings, Settings
@@ -29,34 +28,27 @@ async def investigate_issue(
     settings: Settings = Depends(get_settings),
 ):
     """Run AI investigation for an infrastructure question.
-    
+
     Gathers context from incidents, metrics, and documents, then uses
-    LLM to generate findings and recommendations.
-    
-    Args:
-        request: Investigation request with question
-        session: Authenticated user session
-        settings: Application settings
-        
+    the cloud AI router (Gemini → OpenRouter, free-only) to generate
+    evidence-based findings and recommendations.
+
     Returns:
-        InvestigationResponse with findings and evidence
+        InvestigationResponse with findings, evidence, and routing metadata
     """
     try:
         # Initialize services
         qdrant_service = get_qdrant_service(settings)
-        embedding_service = get_embedding_service(settings)
+        embedding_service = CloudEmbeddingService(settings)
         document_service = DocumentService(qdrant_service, embedding_service)
-        
+
         # Initialize Prometheus client
         prometheus_client = PrometheusClient(
             base_url=settings.prometheus_url,
             timeout_seconds=settings.prometheus_timeout_seconds,
         )
 
-        # Note: IncidentService requires database session
-        # For now, skip incident context (would need refactoring to pass db session)
-        
-        # Create investigator
+        # Create investigator (uses cloud router by default, or Ollama if configured)
         investigator = get_investigator(
             settings=settings,
             document_service=document_service,
@@ -73,7 +65,7 @@ async def investigate_issue(
         return InvestigationResponse(**result)
 
     except Exception as e:
-        logger.exception(f"Investigation failed: {e}")
+        logger.exception("Investigation failed: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Investigation failed: {str(e)}",

@@ -75,3 +75,5 @@ class InvestigationResponse(BaseModel):
     data_sources: list[str]
     error: str | None
     timestamp: str
+    # Cloud routing metadata (provider, model, attempt history, latency)
+    routing_metadata: dict | None = None

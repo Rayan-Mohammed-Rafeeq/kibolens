@@ -1,4 +1,8 @@
-"""LLM testing and health check endpoints."""
+"""LLM testing and health check endpoints (legacy path /llm/*).
+
+These endpoints are kept for backward compatibility with existing tests
+and client integrations.  New code should use /ai/health and /ai/llm/*.
+"""
 
 from __future__ import annotations
 
@@ -38,7 +42,7 @@ class LLMTestResponse(BaseModel):
 @router.get("/health", response_model=LLMHealthResponse)
 async def llm_health_check():
     """Check LLM provider health status.
-    
+
     Returns:
         LLMHealthResponse with provider availability
     """
@@ -46,6 +50,15 @@ async def llm_health_check():
     provider = get_llm_provider(settings)
 
     is_available = await provider.health_check()
+
+    # Cloud routing: adapt the response to the legacy schema
+    if settings.llm_provider.lower() == "cloud":
+        return LLMHealthResponse(
+            provider="cloud-router",
+            model="gemini/openrouter-auto",
+            base_url="https://generativelanguage.googleapis.com",
+            available=is_available,
+        )
 
     return LLMHealthResponse(
         provider=settings.llm_provider,
@@ -58,13 +71,13 @@ async def llm_health_check():
 @router.post("/test", response_model=LLMTestResponse)
 async def llm_test_generate(request: LLMTestRequest):
     """Test LLM text generation (development/testing only).
-    
+
     Args:
         request: Test generation request with prompt
-        
+
     Returns:
         LLMTestResponse with generated content
-        
+
     Raises:
         HTTPException: If LLM generation fails
     """

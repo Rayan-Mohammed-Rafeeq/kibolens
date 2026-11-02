@@ -36,6 +36,7 @@ class InvestigationState(TypedDict):
     findings: str | None
     recommendations: str | None
     error: str | None
+    routing_metadata: dict | None
 
 
 class InvestigationFindings(BaseModel):
@@ -86,14 +87,17 @@ class AIInvestigator:
         self.incident_service = incident_service
         self.prometheus_client = prometheus_client
 
-        # Initialize LLM
-        self.llm = ChatOllama(
-            model=settings.ollama_model,
-            base_url=settings.ollama_base_url,
-            temperature=settings.llm_temperature,
-            num_ctx=2048,  # Context window
-            num_thread=2,  # Conservative threading for low resources
-        )
+        # Initialize LLM only if legacy Ollama is explicitly selected
+        if settings.llm_provider.lower() == "ollama":
+            self.llm = ChatOllama(
+                model=settings.ollama_model,
+                base_url=settings.ollama_base_url,
+                temperature=settings.llm_temperature,
+                num_ctx=2048,  # Context window
+                num_thread=2,  # Conservative threading for low resources
+            )
+        else:
+            self.llm = None
 
         # Build workflow graph
         self.graph = self._build_graph()
@@ -321,20 +325,74 @@ class AIInvestigator:
 
             system_message = "\n".join(context_parts)
 
-            # Generate analysis using LLM
-            messages = [
-                SystemMessage(content=system_message),
-                HumanMessage(content=state["question"]),
-            ]
+            # Generate analysis
+            if self.llm is not None:
+                messages = [
+                    SystemMessage(content=system_message),
+                    HumanMessage(content=state["question"]),
+                ]
+                response = await self.llm.ainvoke(messages)
+                findings_text = response.content if hasattr(response, "content") else str(response)
+                state["findings"] = findings_text
+                state["recommendations"] = findings_text
+                state["messages"] = messages + [AIMessage(content=findings_text)]
+                state["routing_metadata"] = {"provider": "ollama", "model": self.settings.ollama_model}
+            else:
+                from app.ai.router.core import get_ai_router
 
-            response = await self.llm.ainvoke(messages)
-            
-            findings_text = response.content if hasattr(response, 'content') else str(response)
+                router = await get_ai_router(self.settings)
+                routing_result = await router.generate_text(
+                    prompt=state["question"],
+                    system_prompt=system_message,
+                    temperature=self.settings.llm_temperature,
+                    max_tokens=self.settings.llm_max_tokens,
+                )
 
-            state["findings"] = findings_text
-            state["recommendations"] = findings_text  # Same content for now
-            state["messages"] = messages + [AIMessage(content=findings_text)]
-            
+                state["routing_metadata"] = {
+                    "provider": (
+                        routing_result.successful_provider.value
+                        if routing_result.successful_provider
+                        else None
+                    ),
+                    "model": routing_result.successful_model,
+                    "quality_tier": (
+                        routing_result.successful_quality_tier.value
+                        if routing_result.successful_quality_tier
+                        else None
+                    ),
+                    "total_latency_seconds": routing_result.total_latency_seconds,
+                    "input_tokens": routing_result.input_tokens,
+                    "output_tokens": routing_result.output_tokens,
+                    "attempts": [
+                        {
+                            "provider": a.provider.value,
+                            "model": a.model_id,
+                            "succeeded": a.succeeded,
+                            "failure_category": (
+                                a.failure_category.value if a.failure_category else None
+                            ),
+                            "latency_seconds": a.latency_seconds,
+                        }
+                        for a in routing_result.attempts
+                    ],
+                }
+
+                if routing_result.unavailable or not routing_result.content:
+                    error_msg = routing_result.error or "All AI providers are currently unavailable."
+                    state["error"] = error_msg
+                    state["findings"] = None
+                    state["recommendations"] = None
+                else:
+                    findings_text = routing_result.content
+                    state["findings"] = findings_text
+                    state["recommendations"] = findings_text
+                    messages = [
+                        SystemMessage(content=system_message),
+                        HumanMessage(content=state["question"]),
+                        AIMessage(content=findings_text),
+                    ]
+                    state["messages"] = messages
+
             logger.info("Generated investigation findings")
 
         except Exception as e:
@@ -370,6 +428,7 @@ class AIInvestigator:
                 "findings": None,
                 "recommendations": None,
                 "error": None,
+                "routing_metadata": None,
             }
 
             # Run workflow
@@ -397,6 +456,7 @@ class AIInvestigator:
                 },
                 "data_sources": data_sources,
                 "error": final_state.get("error"),
+                "routing_metadata": final_state.get("routing_metadata"),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
 

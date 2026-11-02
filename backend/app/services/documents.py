@@ -9,7 +9,7 @@ from datetime import datetime
 from datetime import timezone as tz
 from io import BytesIO
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO, Union
 from uuid import UUID, uuid4
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -18,6 +18,12 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from app.ai.embeddings import EmbeddingService
 from app.services.qdrant import QdrantService
+
+if TYPE_CHECKING:
+    from app.ai.cloud_embeddings import CloudEmbeddingService
+
+# Accept both the legacy Ollama EmbeddingService and the new CloudEmbeddingService
+AnyEmbeddingService = Union["EmbeddingService", "CloudEmbeddingService"]
 
 UTC = tz.utc
 
@@ -85,7 +91,7 @@ class DocumentService:
     def __init__(
         self,
         qdrant_service: QdrantService,
-        embedding_service: EmbeddingService,
+        embedding_service: AnyEmbeddingService,
         collection_name: str = "documents",
     ):
         """Initialize document service.

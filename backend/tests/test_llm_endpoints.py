@@ -20,9 +20,10 @@ async def test_llm_health_check(client: AsyncClient):
     assert "available" in data
     assert isinstance(data["available"], bool)
 
-    # Should use Ollama by default
-    assert data["provider"] == "ollama"
-    assert "llama" in data["model"].lower()
+    # Should report active provider
+    assert data["provider"] in ("cloud-router", "ollama")
+    if data["provider"] == "ollama":
+        assert "llama" in data["model"].lower()
 
 
 @pytest.mark.asyncio(scope="function")

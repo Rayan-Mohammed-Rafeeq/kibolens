@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="KIBOLENS_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="KIBOLENS_",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_name: str = "KiboLens"
     environment: str = "development"
@@ -30,8 +35,8 @@ class Settings(BaseSettings):
     disk_critical_percent: float = Field(default=90, ge=1, le=100)
     alert_webhook_token: SecretStr | None = None
 
-    # AI/LLM Configuration
-    llm_provider: str = Field(default="ollama")
+    # ── Legacy Ollama (kept for rollback; not invoked by default when cloud routing is active) ──
+    llm_provider: str = Field(default="cloud")  # "cloud" | "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
     ollama_timeout_seconds: float = Field(default=60, gt=0, le=300)
@@ -39,14 +44,46 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2000, ge=100, le=32000)
     llm_request_timeout_seconds: float = Field(default=120, gt=0, le=600)
 
-    # RAG / Vector Database Configuration
+    # ── Cloud AI Provider Keys ──────────────────────────────────────────────
+    # Stored as SecretStr so they are never logged or serialised in plain text.
+    gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
+    groq_api_key: SecretStr | None = Field(default=None, alias="GROQ_API_KEY")
+    openrouter_api_key: SecretStr | None = Field(default=None, alias="OPENROUTER_API_KEY")
+
+    # ── Free-only Enforcement ───────────────────────────────────────────────
+    ai_free_only: bool = Field(default=True)
+    ai_allow_paid_models: bool = Field(default=False)
+
+    # ── Routing Parameters ──────────────────────────────────────────────────
+    ai_max_model_attempts: int = Field(default=4, ge=1, le=20)
+    ai_provider_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
+    ai_model_catalog_refresh_hours: float = Field(default=24.0, gt=0, le=168)
+    ai_gemini_text_models: str = Field(
+        default="gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    )
+    ai_gemini_vision_models: str = Field(
+        default="gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    )
+    ai_groq_text_models: str = Field(
+        default="llama-3.3-70b-versatile,llama-3.1-70b-versatile,llama-3.1-8b-instant,gemma2-9b-it,mixtral-8x7b-32768"
+    )
+    ai_groq_vision_models: str = Field(
+        default="llama-3.2-90b-vision-preview,llama-3.2-11b-vision-preview,qwen-2.5-32b"
+    )
+
+    # ── Canonical Cloud Embedding Configuration (Gemini Embedding 2) ───────
+    gemini_embedding_model: str = Field(default="gemini-embedding-2")
+    gemini_embedding_dimension: int = Field(default=768)
+
+    # ── RAG / Vector Database Configuration ────────────────────────────────
     qdrant_url: str = "http://localhost:6333"
     qdrant_timeout_seconds: float = Field(default=10, gt=0, le=60)
-    
-    # Embedding Configuration
-    embedding_model: str = Field(default="all-minilm")  # all-minilm, nomic-embed-text, mxbai-embed-large
 
-    # Email/OTP Configuration
+    # ── Embedding Configuration ─────────────────────────────────────────────
+    # Legacy Ollama embedding model kept for reference; cloud routing uses Gemini Embedding.
+    embedding_model: str = Field(default="all-minilm")
+
+    # ── Email/OTP Configuration ─────────────────────────────────────────────
     resend_api_key: SecretStr | None = Field(default=None, alias="RESEND_API_KEY")
     email_from: str = Field(default="noreply@example.com")
     email_reply_to: str | None = None
@@ -71,6 +108,11 @@ class Settings(BaseSettings):
                 raise ValueError("RESEND_API_KEY is required in production.")
             if self.otp_hash_secret.get_secret_value() == "change-me-otp-secret":
                 raise ValueError("KIBOLENS_OTP_HASH_SECRET must be set in production.")
+            if self.ai_allow_paid_models:
+                raise ValueError(
+                    "KIBOLENS_AI_ALLOW_PAID_MODELS must not be enabled in production "
+                    "unless explicitly reviewed and approved."
+                )
         if self.cpu_warning_percent >= self.cpu_critical_percent:
             raise ValueError("CPU warning threshold must be less than its critical threshold.")
         if self.memory_warning_percent >= self.memory_critical_percent:
@@ -78,7 +120,7 @@ class Settings(BaseSettings):
         if self.disk_warning_percent >= self.disk_critical_percent:
             raise ValueError("Disk warning threshold must be less than its critical threshold.")
         return self
-    
+
     def get_allowed_emails(self) -> set[str]:
         """Parse and normalize allowed email addresses."""
         emails = {email.strip().lower() for email in self.allowed_emails.split(",")}
