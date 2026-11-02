@@ -57,7 +57,8 @@ class VMObserver:
         try:
             connection = libvirt.openReadOnly(self.uri)
             if connection is None:
-                self.last_error = self._connection_error()
+                # Socket absent or libvirt not configured - treat as normal empty state
+                logger.info("libvirt socket not available, treating as unconfigured VM integration")
                 return []
             now = time.monotonic()
             observed_at = datetime.now(timezone.utc)

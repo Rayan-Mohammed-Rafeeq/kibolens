@@ -24,6 +24,7 @@ async def test_vm_observer_handles_missing_python_binding(monkeypatch) -> None:
 
 @pytest.mark.anyio
 async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
+    """When libvirt socket is absent, treat as normal unconfigured/empty state."""
     class FakeLibvirt:
         @staticmethod
         def openReadOnly(uri: str):
@@ -35,15 +36,12 @@ async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
     observer = VMObserver()
 
     assert await observer.list_vms() == []
-    assert observer.last_error == (
-        "VM inventory is unavailable: the libvirt connection 'qemu:///system' "
-        "could not be queried. Ensure libvirtd is running and /var/run/libvirt "
-        "is mounted and authorized."
-    )
+    assert observer.last_error is None
 
 
 @pytest.mark.anyio
 async def test_vm_observer_handles_unavailable_daemon(monkeypatch) -> None:
+    """When libvirt daemon fails to connect, report genuine error."""
     class FakeLibvirt:
         @staticmethod
         def openReadOnly(uri: str):
@@ -56,6 +54,23 @@ async def test_vm_observer_handles_unavailable_daemon(monkeypatch) -> None:
     assert await observer.list_vms() == []
     assert observer.last_error is not None
     assert "failed to connect to the libvirt daemon" in observer.last_error
+
+
+@pytest.mark.anyio
+async def test_vm_observer_handles_permission_error(monkeypatch) -> None:
+    """When libvirt socket exists but connection fails due to permission, report error."""
+    class FakeLibvirt:
+        @staticmethod
+        def openReadOnly(uri: str):
+            raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
+
+    observer = VMObserver()
+
+    assert await observer.list_vms() == []
+    assert observer.last_error is not None
+    assert "Permission denied" in observer.last_error
 
 
 @pytest.mark.anyio
