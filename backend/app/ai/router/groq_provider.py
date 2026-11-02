@@ -28,6 +28,7 @@ from app.ai.router.types import (
     ModelStatus,
     ProviderName,
     QualityTier,
+    output_limit_reached,
 )
 from app.core.config import Settings
 
@@ -157,6 +158,7 @@ class GroqCatalogue:
                     quality_tier=m["quality_tier"],
                     priority=m["priority"],
                     context_limit=m.get("context_limit"),
+                    max_output_tokens=m.get("max_output_tokens"),
                     prompt_price_usd=0.0,
                     completion_price_usd=0.0,
                     last_verified_at=datetime.now(timezone.utc),
@@ -177,6 +179,7 @@ class GroqCatalogue:
                     quality_tier=m["quality_tier"],
                     priority=m["priority"],
                     context_limit=m.get("context_limit"),
+                    max_output_tokens=m.get("max_output_tokens"),
                     prompt_price_usd=0.0,
                     completion_price_usd=0.0,
                     last_verified_at=datetime.now(timezone.utc),
@@ -269,6 +272,7 @@ class GroqCatalogue:
                 continue
 
             context_window = item.get("context_window", 8192)
+            max_output_tokens = item.get("max_completion_tokens")
             is_preview = "-preview" in low_id or "distill" in low_id
 
             # Determine quality tier and priority
@@ -304,6 +308,7 @@ class GroqCatalogue:
                 quality_tier=quality_tier,
                 priority=priority,
                 context_limit=context_window,
+                max_output_tokens=max_output_tokens,
                 prompt_price_usd=0.0,
                 completion_price_usd=0.0,
                 last_verified_at=datetime.now(timezone.utc),
@@ -322,6 +327,7 @@ class GroqCatalogue:
                     quality_tier=v_qt,
                     priority=v_pri,
                     context_limit=context_window,
+                    max_output_tokens=max_output_tokens,
                     prompt_price_usd=0.0,
                     completion_price_usd=0.0,
                     last_verified_at=datetime.now(timezone.utc),
@@ -455,8 +461,12 @@ class GroqProvider:
                 "output_tokens": usage.get("completion_tokens"),
                 "rate_limit_headers": rate_limit_headers,
             }
+            metadata["finish_reason"] = finish_reason or None
+            metadata["incomplete"] = output_limit_reached(finish_reason)
             if finish_reason == "content_filter":
                 return "", metadata, FailureCategory.SAFETY_REFUSAL
+            if output_limit_reached(finish_reason):
+                logger.warning("Groq %s stopped at the output token limit", model_id)
             return content, metadata, None
         except (KeyError, IndexError, ValueError) as exc:
             logger.warning("Groq response parse error: %s — body: %s", exc, resp.text[:300])

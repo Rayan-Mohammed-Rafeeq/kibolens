@@ -36,6 +36,7 @@ export interface Incident {
   status: IncidentStatus;
   source: string;
   alert_fingerprint: string | null;
+  logical_fingerprint: string | null;
   affected_host: string | null;
   affected_service: string | null;
   first_detected_at: string;

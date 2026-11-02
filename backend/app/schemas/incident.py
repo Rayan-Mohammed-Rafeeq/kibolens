@@ -47,6 +47,7 @@ class IncidentResponse(BaseModel):
     resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    logical_fingerprint: str | None = None
 
     class Config:
         from_attributes = True

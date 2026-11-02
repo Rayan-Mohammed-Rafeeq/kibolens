@@ -22,6 +22,7 @@ from app.ai.router.types import (
     ModelStatus,
     ProviderName,
     QualityTier,
+    output_limit_reached,
 )
 from app.core.config import Settings
 
@@ -197,6 +198,7 @@ class OpenRouterCatalogue:
                 quality_tier=qt,
                 priority=pri,
                 context_limit=m.get("context_length"),
+                max_output_tokens=(m.get("top_provider") or {}).get("max_completion_tokens") or m.get("max_completion_tokens"),
                 prompt_price_usd=prompt_price,
                 completion_price_usd=completion_price,
                 last_verified_at=datetime.now(timezone.utc),
@@ -342,8 +344,12 @@ class OpenRouterProvider:
                 "input_tokens": usage.get("prompt_tokens"),
                 "output_tokens": usage.get("completion_tokens"),
             }
+            metadata["finish_reason"] = finish_reason or None
+            metadata["incomplete"] = output_limit_reached(finish_reason)
             if finish_reason == "content_filter":
                 return "", metadata, FailureCategory.SAFETY_REFUSAL
+            if output_limit_reached(finish_reason):
+                logger.warning("OpenRouter %s stopped at the output token limit", model_id)
             return content, metadata, None
         except (KeyError, IndexError, ValueError) as exc:
             logger.warning(

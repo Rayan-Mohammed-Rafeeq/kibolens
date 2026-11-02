@@ -52,3 +52,27 @@ async def test_langgraph_routes_relevant_sources_and_uses_langchain_adapter():
     assert "Knowledge Base" in result["data_sources"]
     assert result["routing_metadata"]["provider"] == "gemini"
     assert result["evidence"]["execution"]["retrieval_counts"] == {"metrics": 1, "documents": 1}
+
+
+@pytest.mark.asyncio
+async def test_langgraph_preserves_full_response_and_reports_output_limit():
+    full_content = "## Complete section\n\n" + ("Evidence line. " * 150)
+
+    class TruncatedRouter(FakeRouter):
+        async def generate_text(self, **kwargs):
+            result = await super().generate_text(**kwargs)
+            result.content = full_content
+            result.finish_reason = "MAX_TOKENS"
+            result.incomplete = True
+            result.incomplete_reason = "output_token_limit"
+            return result
+
+    investigator = CloudAIInvestigator(
+        settings=Settings(database_url="sqlite://", llm_provider="cloud"),
+        router=TruncatedRouter(),
+    )
+    result = await investigator.investigate("Provide the complete infrastructure analysis")
+
+    assert full_content in result["findings"]
+    assert "output-token limit" in result["findings"]
+    assert result["routing_metadata"]["incomplete"] is True

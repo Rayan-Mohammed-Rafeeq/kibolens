@@ -352,6 +352,8 @@ class CloudAIInvestigator:
                 "5. Recommend concrete next steps",
                 "6. NEVER fabricate metrics or logs - only use provided data",
                 "7. Distinguish between observed evidence and AI-generated hypotheses",
+                "8. Structure the answer with: Current status, Actual metric values, Analysis, Potential risks, Supporting evidence, Recommendations, and Missing information/uncertainty",
+                "9. For unavailable values, say that the value is unavailable rather than estimating it",
             ])
 
             system_prompt = "\n".join(context_parts)
@@ -367,12 +369,20 @@ class CloudAIInvestigator:
             })
             response = await self._langchain_model.ainvoke(prompt_value.messages)
             routing_metadata = response.response_metadata
-            findings_text = str(response.content).strip()
+            findings_text = str(response.content)
+
+            if routing_metadata.get("incomplete") and findings_text.strip():
+                separator = "" if findings_text.endswith("\n") else "\n"
+                findings_text = (
+                    f"{findings_text}{separator}\n> **Response status:** The provider stopped at its "
+                    "output-token limit. The content above is the complete provider response "
+                    "but may be incomplete."
+                )
 
             # Build routing metadata for the response
             state["routing_metadata"] = routing_metadata
 
-            if routing_metadata.get("unavailable") or not findings_text or findings_text.lower() == "cloud ai providers returned no response.":
+            if routing_metadata.get("unavailable") or not findings_text.strip() or findings_text.strip().lower() == "cloud ai providers returned no response.":
                 error_msg = routing_metadata.get("error") or "All eligible cloud AI providers returned no usable response. No paid models were used."
                 logger.warning("Investigation analysis unavailable: %s", error_msg)
                 state["error"] = error_msg

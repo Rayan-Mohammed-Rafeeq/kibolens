@@ -168,6 +168,35 @@ async def test_gemini_success(router: AIRouter):
     assert result.attempts[0].succeeded is True
 
 
+@pytest.mark.asyncio
+async def test_output_limit_is_reported_without_discarding_provider_content(router: AIRouter):
+    """A provider length stop remains successful but is explicitly marked incomplete."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "candidates": [{
+            "content": {"parts": [{"text": "first part"}, {"text": "second part"}]},
+            "finishReason": "MAX_TOKENS",
+        }],
+        "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 200},
+    }
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        instance = AsyncMock()
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        instance.post = AsyncMock(return_value=mock_resp)
+        mock_client_cls.return_value = instance
+
+        result = await router.generate_text("Give a detailed infrastructure analysis")
+
+    assert result.content == "first part\nsecond part"
+    assert result.successful_provider == ProviderName.GEMINI
+    assert result.finish_reason == "MAX_TOKENS"
+    assert result.incomplete is True
+    assert result.attempts[0].finish_reason == "MAX_TOKENS"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # B. Gemini rate-limit → fallback to next Gemini model → OpenRouter
 # ─────────────────────────────────────────────────────────────────────────────

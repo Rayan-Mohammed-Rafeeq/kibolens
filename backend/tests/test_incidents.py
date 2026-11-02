@@ -13,6 +13,7 @@ from app.core.security import token_hash
 from app.models.incident import Incident, IncidentEvent, EvidenceRecord, IncidentSequence
 from app.models.session import UserSession
 from app.models.user import User
+from app.models.notification import EmailNotification
 from app.schemas.monitoring import AlertmanagerAlert
 from app.services.incidents import IncidentService, VALID_TRANSITIONS
 from sqlalchemy.orm import Session
@@ -512,6 +513,68 @@ class TestAPIEndpoints:
         data = response.json()
         assert "incidents" in data
         assert data["total"] == 1
+
+    def test_list_incidents_authenticated_with_zero_records(
+        self, client, user_session: tuple
+    ):
+        _, token = user_session
+        response = client.get(
+            "/api/v1/incidents?page=1&page_size=20",
+            cookies={"kibolens_session": token},
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "incidents": [],
+            "total": 0,
+            "page": 1,
+            "page_size": 20,
+        }
+
+    def test_list_incidents_pagination_filters_and_notification_fields(
+        self, client, database: Session, user_session: tuple
+    ):
+        _, token = user_session
+        service = IncidentService(database, None)
+        critical = service.create_incident(
+            title="Database unavailable", description="Connection refused", severity="CRITICAL",
+            affected_service="postgres",
+            logical_fingerprint="logical-postgres",
+        )
+        warning = service.create_incident(
+            title="Worker warning", description="Queue is growing", severity="WARNING",
+            affected_service="worker",
+        )
+        resolved = service.create_incident(
+            title="Resolved API issue", description="Recovered", severity="HIGH",
+            affected_service="api",
+        )
+        service.resolve_incident(resolved.id)
+        database.add(EmailNotification(
+            incident_id=critical.id,
+            event_key="incident-created",
+            recipient="admin@example.com",
+            status="sent",
+            attempts=1,
+        ))
+        database.commit()
+
+        response = client.get(
+            "/api/v1/incidents?page=1&page_size=1&severity=CRITICAL&affected_service=postgres",
+            cookies={"kibolens_session": token},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert len(data["incidents"]) == 1
+        assert data["incidents"][0]["logical_fingerprint"] == "logical-postgres"
+
+        response = client.get(
+            "/api/v1/incidents?page=1&page_size=1&status=RESOLVED&search=Resolved",
+            cookies={"kibolens_session": token},
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+        assert response.json()["incidents"][0]["id"] == str(resolved.id)
 
     def test_get_incident_detail(
         self, client, database: Session, user: User, user_session: tuple

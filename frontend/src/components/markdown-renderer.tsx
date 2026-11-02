@@ -77,7 +77,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         </code>
       );
     },
-    pre: ({ children }) => <pre className="mb-4 last:mb-0">{children}</pre>,
+    pre: ({ children }) => <pre className="mb-4 max-w-full overflow-x-auto last:mb-0">{children}</pre>,
 
     // Blockquotes
     blockquote: ({ children }) => (
@@ -127,7 +127,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   };
 
   return (
-    <div className="markdown-content">
+    <div className="markdown-content min-w-0 break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>

@@ -217,6 +217,15 @@ The system shows **high CPU usage** with the following metrics:
     expect(container.textContent).toBe("");
   });
 
+  it("renders the complete long response without clipping its content", () => {
+    const content = "## Infrastructure status\n\n" + ("Observed evidence line.\n".repeat(400));
+    const { container } = render(<MarkdownRenderer content={content} />);
+
+    expect(container.textContent).toContain("Observed evidence line.");
+    expect(container.textContent?.length).toBeGreaterThan(content.length - 20);
+    expect(container.firstElementChild?.className).toContain("break-words");
+  });
+
   it("handles special characters in code", () => {
     const markdown = "Use \`<div>\` and \`&nbsp;\` entities.";
     render(<MarkdownRenderer content={markdown} />);

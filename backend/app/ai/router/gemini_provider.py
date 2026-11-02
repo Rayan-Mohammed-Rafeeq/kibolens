@@ -36,6 +36,7 @@ from app.ai.router.types import (
     ModelStatus,
     ProviderName,
     QualityTier,
+    output_limit_reached,
 )
 from app.core.config import Settings
 
@@ -317,6 +318,7 @@ class GeminiCatalogue:
 
             # Context window
             context_limit = item.get("inputTokenLimit", 1_000_000)
+            max_output_tokens = item.get("outputTokenLimit")
 
             # Determine if vision-capable (multimodal)
             is_vision = any(pattern in model_id.lower() for pattern in _VISION_CAPABLE_PATTERNS)
@@ -351,6 +353,7 @@ class GeminiCatalogue:
                 quality_tier=quality_tier,
                 priority=priority,
                 context_limit=context_limit,
+                max_output_tokens=max_output_tokens,
                 prompt_price_usd=0.0,
                 completion_price_usd=0.0,
                 last_verified_at=datetime.now(timezone.utc),
@@ -369,6 +372,7 @@ class GeminiCatalogue:
                     quality_tier=v_qt,
                     priority=v_pri,
                     context_limit=context_limit,
+                    max_output_tokens=max_output_tokens,
                     prompt_price_usd=0.0,
                     completion_price_usd=0.0,
                     last_verified_at=datetime.now(timezone.utc),
@@ -511,7 +515,11 @@ class GeminiProvider:
         try:
             data = resp.json()
             candidate = data["candidates"][0]
-            content_text = candidate["content"]["parts"][0]["text"]
+            content_text = "\n".join(
+                part.get("text", "")
+                for part in candidate.get("content", {}).get("parts", [])
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            )
             usage = data.get("usageMetadata", {})
             metadata = {
                 "provider": ProviderName.GEMINI.value,
@@ -522,8 +530,12 @@ class GeminiProvider:
             }
             # Check for safety block
             finish_reason = candidate.get("finishReason", "")
+            metadata["finish_reason"] = finish_reason or None
+            metadata["incomplete"] = output_limit_reached(finish_reason)
             if finish_reason == "SAFETY":
                 return "", metadata, FailureCategory.SAFETY_REFUSAL
+            if output_limit_reached(finish_reason):
+                logger.warning("Gemini %s stopped at the output token limit", model_id)
             return content_text, metadata, None
         except (KeyError, IndexError, ValueError) as exc:
             logger.warning("Gemini response parse error: %s — body: %s", exc, resp.text[:300])

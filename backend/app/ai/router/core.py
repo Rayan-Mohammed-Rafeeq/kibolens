@@ -343,17 +343,21 @@ class AIRouter:
                 )
 
                 t0 = time.monotonic()
+                model_max_tokens = max_tokens
+                if model.max_output_tokens:
+                    model_max_tokens = min(max_tokens, model.max_output_tokens)
                 content, metadata, failure = await self._call_provider(
                     provider=provider,
                     model_id=model.model_id,
                     prompt=prompt,
                     system_prompt=system_prompt,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=model_max_tokens,
                 )
                 attempt.latency_seconds = round(time.monotonic() - t0, 3)
                 attempt.input_tokens = metadata.get("input_tokens")
                 attempt.output_tokens = metadata.get("output_tokens")
+                attempt.finish_reason = metadata.get("finish_reason")
                 consumed += 1
 
                 if failure is None and isinstance(content, str) and content.strip():
@@ -365,6 +369,11 @@ class AIRouter:
                     result.content = content
                     result.input_tokens = metadata.get("input_tokens")
                     result.output_tokens = metadata.get("output_tokens")
+                    result.finish_reason = metadata.get("finish_reason")
+                    result.incomplete = bool(metadata.get("incomplete"))
+                    result.incomplete_reason = (
+                        "output_token_limit" if result.incomplete else None
+                    )
                     self._circuit_breaker.record_success(provider.value, model.model_id)
                     logger.info(
                         "SUCCESS: %s/%s after %d attempts (tier=%s)",

@@ -51,6 +51,11 @@ class CloudRouterChatModel(BaseChatModel):
             "model": result.successful_model,
             "quality_tier": result.successful_quality_tier.value if result.successful_quality_tier else None,
             "latency_seconds": result.total_latency_seconds,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "finish_reason": result.finish_reason,
+            "incomplete": result.incomplete,
+            "incomplete_reason": result.incomplete_reason,
             "unavailable": result.unavailable,
             "error": result.error,
             "attempts": [
@@ -59,6 +64,7 @@ class CloudRouterChatModel(BaseChatModel):
                     "model": attempt.model_id,
                     "succeeded": attempt.succeeded,
                     "failure_category": attempt.failure_category.value if attempt.failure_category else None,
+                    "finish_reason": attempt.finish_reason,
                 }
                 for attempt in result.attempts
             ],

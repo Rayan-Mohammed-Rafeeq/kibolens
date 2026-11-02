@@ -11,6 +11,7 @@ from app.services.auth import (
     create_session,
     hash_password
 )
+from app.services import conversations
 from app.core.config import get_settings
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -228,6 +229,17 @@ def test_investigation_creates_assistant_response(
         assert "unavailable" in result["findings"].lower() or \
                "provider" in result["findings"].lower() or \
                len(result["findings"]) > 50  # Real AI response would be longer
+
+
+def test_persistence_preserves_complete_assistant_message(database: Session) -> None:
+    admin = bootstrap(database)
+    conversation = conversations.create_conversation(database, admin.id, "Long response")
+    content = "# Infrastructure analysis\n\n" + ("A complete evidence line.\n" * 500)
+
+    conversations.add_assistant_message(database, conversation, content)
+    persisted = conversations.list_messages(database, conversation.id, 0, 10)
+
+    assert persisted[0].content == content
 
 
 

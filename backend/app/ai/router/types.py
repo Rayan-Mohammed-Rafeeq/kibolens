@@ -78,6 +78,19 @@ NON_RETRIABLE_CATEGORIES = frozenset(
     ]
 )
 
+OUTPUT_LIMIT_FINISH_REASONS = frozenset({
+    "MAX_TOKENS",
+    "MAX_OUTPUT_TOKENS",
+    "max_tokens",
+    "length",
+    "LENGTH",
+})
+
+
+def output_limit_reached(finish_reason: str | None) -> bool:
+    """Return whether a provider stopped because its output budget was exhausted."""
+    return bool(finish_reason and finish_reason in OUTPUT_LIMIT_FINISH_REASONS)
+
 # Errors that mark the whole provider as unavailable
 PROVIDER_WIDE_FAILURE_CATEGORIES = frozenset(
     [
@@ -99,6 +112,7 @@ class ModelEntry:
     quality_tier: QualityTier
     priority: int                          # Lower = higher priority
     context_limit: int | None = None
+    max_output_tokens: int | None = None
     # Pricing metadata (per 1M tokens, USD)
     prompt_price_usd: float | None = None
     completion_price_usd: float | None = None
@@ -135,6 +149,7 @@ class ModelAttempt:
     succeeded: bool = False
     input_tokens: int | None = None
     output_tokens: int | None = None
+    finish_reason: str | None = None
 
 
 @dataclass
@@ -152,6 +167,9 @@ class RoutingResult:
     total_latency_seconds: float = 0.0
     input_tokens: int | None = None
     output_tokens: int | None = None
+    finish_reason: str | None = None
+    incomplete: bool = False
+    incomplete_reason: str | None = None
     # The actual generated content / embedding
     content: str = ""
     embedding: list[float] | None = None

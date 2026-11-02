@@ -1,7 +1,11 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import status as http_status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from pydantic import ValidationError
 
 from app.api.dependencies import CsrfSession, CurrentUser, get_db
 from app.ai.cloud_embeddings import CloudEmbeddingService
@@ -30,6 +34,7 @@ from app.services.incidents import IncidentService
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
+logger = logging.getLogger(__name__)
 
 
 def get_incident_service(db: Session = Depends(get_db)) -> IncidentService:
@@ -76,21 +81,33 @@ async def list_incidents(
     - affected_service: exact match
     - search: fuzzy match against incident number, title, description
     """
-    incidents, total = service.list_incidents(
-        page=page,
-        page_size=page_size,
-        severity=severity,
-        status=status,
-        affected_service=affected_service,
-        search=search,
-    )
-
-    return IncidentListResponse(
-        incidents=[IncidentResponse.model_validate(inc) for inc in incidents],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
+    try:
+        incidents, total = service.list_incidents(
+            page=page,
+            page_size=page_size,
+            severity=severity,
+            status=status,
+            affected_service=affected_service,
+            search=search,
+        )
+        return IncidentListResponse(
+            incidents=[IncidentResponse.model_validate(inc) for inc in incidents],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    except SQLAlchemyError as exc:
+        logger.exception("Incident list query failed")
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Incident storage is unavailable. Verify the database and run migrations.",
+        ) from exc
+    except ValidationError as exc:
+        logger.exception("Incident list response serialization failed")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Incident data could not be serialized. Check the incident schema and stored values.",
+        ) from exc
 
 
 @router.get("/{incident_id}", response_model=IncidentDetailResponse)
