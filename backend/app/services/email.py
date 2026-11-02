@@ -106,6 +106,19 @@ KiboLens Incident Management System
 </body>
 </html>"""
         
+        self._send_email(to_email, subject, text_body, html_body)
+
+    def send_incident_email(
+        self,
+        to_email: str,
+        subject: str,
+        text_body: str,
+        html_body: str,
+    ) -> str:
+        """Send an incident notification and return Resend's message ID."""
+        return self._send_email(to_email, subject, text_body, html_body)
+
+    def _send_email(self, to_email: str, subject: str, text_body: str, html_body: str) -> str:
         # Send via Resend API
         try:
             with httpx.Client(timeout=10.0) as client:
@@ -125,14 +138,15 @@ KiboLens Incident Management System
                     },
                 )
                 
-                if response.status_code != 200:
+                if response.status_code not in (200, 201):
                     logger.error(
                         f"Resend API error: status={response.status_code}, "
                         f"response={response.text[:200]}"
                     )
                     raise EmailSendError(f"Failed to send email: HTTP {response.status_code}")
                     
-                logger.info(f"OTP email sent successfully to {masked_email}")
+                logger.info(f"Email sent successfully to {masked_email}")
+                return str(response.json().get("id", ""))
                 
         except httpx.TimeoutException as e:
             logger.error(f"Resend API timeout: {e}")
@@ -162,6 +176,10 @@ class MockEmailService:
             "otp": otp_code,
         })
         logger.info(f"Mock: OTP email recorded for {to_email}")
+
+    def send_incident_email(self, to_email: str, subject: str, text_body: str, html_body: str) -> str:
+        self.sent_emails.append({"to": to_email, "subject": subject, "text": text_body, "html": html_body})
+        return "mock-email-id"
         
     def get_last_otp(self, email: str) -> str | None:
         """Get the last OTP sent to an email address (test helper)."""

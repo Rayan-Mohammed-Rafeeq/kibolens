@@ -11,6 +11,11 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations: { summary: "Low available memory" }
+      - alert: CriticalMemoryExhaustion
+        expr: 100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 97
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Critical host memory exhaustion" }
       - alert: HighDiskUtilization
         expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) > 90
         for: 15m
@@ -26,6 +31,16 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations: { summary: "Container memory pressure" }
+      - alert: ContainerCpuPressure
+        expr: sum by (id, name) (rate(container_cpu_usage_seconds_total{image!="",id!=""}[5m])) * 100 > 90
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Sustained container CPU pressure" }
+      - alert: ContainerFilesystemPressure
+        expr: 100 * (1 - (container_fs_usage_bytes{image!="",id!=""} / container_fs_limit_bytes{image!="",id!=""})) > 90
+        for: 10m
+        labels: { severity: high }
+        annotations: { summary: "Container filesystem nearly full" }
       - alert: ContainerRepeatedlyRestarting
         expr: increase(container_restart_count{image!=""}[10m]) > 2
         for: 2m
@@ -41,3 +56,8 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations: { summary: "No host network receive traffic observed" }
+      - alert: HighHostTemperature
+        expr: max(node_hwmon_temp_celsius) > 90
+        for: 5m
+        labels: { severity: high }
+        annotations: { summary: "High host temperature" }

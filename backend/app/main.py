@@ -15,6 +15,9 @@ from app.monitoring.prometheus import PrometheusClient
 from app.monitoring.service import MonitoringService
 from app.services.incidents import IncidentService
 from app.schemas.monitoring import AlertmanagerAlert
+from app.models.incident import Incident
+from sqlalchemy import select
+from app.services.notifications import notify_incident
 
 # Global Qdrant service instance
 _qdrant_service = None
@@ -22,86 +25,84 @@ _docker_task: asyncio.Task | None = None
 logger = logging.getLogger(__name__)
 
 
-async def _observe_lab_failures(settings) -> None:
-    """Poll retained Docker state and correlate lab failures with incidents."""
+async def _observe_container_events(settings) -> None:
+    """Correlate Docker lifecycle failures with the normal incident pipeline."""
     observer = DockerObserver(settings.docker_socket_path)
-    active: set[str] = set()
     event_cursor = time.time() - 15
     while True:
         try:
             now = time.time()
             lifecycle_events = await observer.events_since(event_cursor, now)
             event_cursor = now
-            lab_containers = await observer.lab_containers()
-            failures = [item for item in lab_containers if item["status"] == "UNHEALTHY" or (
-                item["status"] == "STOPPED" and item.get("exit_code", 0) != 0
-            ) or (item.get("restart_count") or 0) > 0]
-            known_ids = {item.get("id", "").lstrip("/").removeprefix("docker/") for item in lab_containers}
             for event in lifecycle_events:
                 event_id = (event.get("id") or "").lstrip("/").removeprefix("docker/")
-                if event.get("status") in {"die", "kill", "health_status: unhealthy"} and event_id and event_id not in known_ids:
-                    failures.append({
-                        "id": event_id,
-                        "name": event.get("name") or event_id[:12],
-                        "status": "STOPPED" if event.get("status") != "health_status: unhealthy" else "UNHEALTHY",
-                        "restart_count": 0,
-                        "exit_code": int(event.get("exit_code") or 1),
-                        "last_observation": None,
-                        "image": None,
-                        "labels": event.get("labels", {}),
-                        "logs": f"Docker lifecycle event: {event.get('status')}",
-                    })
-            current = {item["id"] for item in failures}
-            db = SessionLocal()
-            try:
-                service = IncidentService(
-                    db,
-                    MonitoringService(
-                        PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
-                        settings,
-                        observer,
-                    ),
-                )
-                for item in failures:
-                    fingerprint = f"docker:{item['id']}:failure"
-                    if item["id"] not in active:
+                if not event_id:
+                    continue
+                event_status = event.get("status", "")
+                labels = event.get("labels", {})
+                is_lab = labels.get("kibolens.lab") == "true"
+                exit_code = int(event.get("exit_code") or 0)
+                failure = event_status in {"kill", "oom", "health_status: unhealthy"} or (event_status == "die" and exit_code != 0)
+                recovery = event_status in {"start", "health_status: healthy"}
+                if not failure and not recovery:
+                    continue
+                fingerprint = f"docker:{event_id}:health" if event_status.startswith("health_status") else f"docker:{event_id}:process"
+                db = SessionLocal()
+                try:
+                    service = IncidentService(
+                        db,
+                        MonitoringService(
+                            PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
+                            settings,
+                            observer,
+                            None,
+                        ),
+                    )
+                    if failure:
+                        severity = "critical" if event_status in {"oom", "kill"} else "high"
                         alert = AlertmanagerAlert(
                             status="firing",
                             fingerprint=fingerprint,
                             labels={
-                                "alertname": "DockerLabFailure",
-                                "severity": "warning",
-                                "service": item["name"],
-                                "kibolens_lab": "true",
+                                "alertname": "DockerContainerFailure",
+                                "severity": severity,
+                                "service": event.get("name") or event_id[:12],
+                                "kibolens_source": "docker",
+                                "kibolens_lab": "true" if is_lab else "false",
                             },
                             annotations={
-                                "summary": f"Failure Lab scenario failed: {item['name']}",
-                                "description": item.get("logs") or "Docker reported a lab failure.",
+                                "summary": f"Docker container {event.get('name') or event_id[:12]} {event_status}",
+                                "description": f"Docker lifecycle event {event_status}; exit_code={exit_code}.",
                             },
                         )
                         incident = service.process_alert(alert)
                         service.capture_evidence(
-                            incident.id, "CONTAINER_STATE", source="docker",
-                            resource_identifier=item["name"],
-                            metadata={
-                                key: value for key, value in item.items()
-                                if key != "last_observation"
-                            },
+                            incident.id,
+                            "CONTAINER_STATE",
+                            source="docker",
+                            resource_identifier=event.get("name") or event_id,
+                            metadata={"event": event_status, "exit_code": exit_code, "labels": labels, "simulated": False},
                         )
+                        await service.collect_incident_evidence(incident)
+                        await notify_incident(db, incident, "firing", settings)
                         db.commit()
-                for container_id in active - current:
-                    recovered = next((item for item in lab_containers if item["id"] == container_id), None)
-                    if recovered and recovered["status"] == "RUNNING":
-                        alert = AlertmanagerAlert(
-                            status="resolved", fingerprint=f"docker:{container_id}:failure",
-                            labels={"alertname": "DockerLabFailure", "severity": "warning", "service": recovered["name"], "kibolens_lab": "true"},
-                            annotations={"summary": f"Failure Lab scenario recovered: {recovered['name']}"},
-                        )
-                        service.process_alert(alert)
-                        db.commit()
-                active = current
-            finally:
-                db.close()
+                    elif recovery:
+                        existing = db.scalar(select(Incident).where(
+                            Incident.alert_fingerprint == fingerprint,
+                            Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]),
+                        ))
+                        if existing:
+                            alert = AlertmanagerAlert(
+                                status="resolved",
+                                fingerprint=fingerprint,
+                                labels={"alertname": "DockerContainerFailure", "severity": "warning", "service": event.get("name") or event_id, "kibolens_source": "docker", "kibolens_lab": "true" if is_lab else "false"},
+                                annotations={"summary": f"Docker container {event.get('name') or event_id} recovered"},
+                            )
+                            resolved = service.process_alert(alert)
+                            await notify_incident(db, resolved, "resolved", settings)
+                            db.commit()
+                finally:
+                    db.close()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -120,7 +121,7 @@ async def lifespan(_: FastAPI):
 
     global _docker_task
     if settings.docker_observer_enabled:
-        _docker_task = asyncio.create_task(_observe_lab_failures(settings))
+        _docker_task = asyncio.create_task(_observe_container_events(settings))
 
     # Pre-warm the AI router singleton (validates configuration)
     if settings.llm_provider.lower() == "cloud":

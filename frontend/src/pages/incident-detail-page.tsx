@@ -110,7 +110,7 @@ export function IncidentDetailPage() {
 
       <div className="mt-4 flex items-start justify-between gap-4">
         <div>
-          <p className="font-mono text-sm text-cyan-400">{incident.incident_number}</p>
+            <p className="font-mono text-sm text-cyan-400">{incident.incident_number} {incident.source === "simulation" && <span className="ml-2 rounded bg-fuchsia-400/15 px-2 py-0.5 text-xs text-fuchsia-200">SIMULATED</span>}</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{incident.title}</h1>
           <p className="mt-2 text-zinc-400">{incident.description}</p>
         </div>

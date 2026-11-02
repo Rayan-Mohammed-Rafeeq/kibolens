@@ -3,6 +3,7 @@ from app.models.incident import EvidenceRecord, Incident, IncidentEvent, Inciden
 from app.models.session import UserSession
 from app.models.user import User
 from app.models.investigation_checkpoint import InvestigationCheckpoint
+from app.models.notification import EmailNotification
 
 __all__ = [
     "Conversation",
@@ -14,4 +15,5 @@ __all__ = [
     "User",
     "UserSession",
     "InvestigationCheckpoint",
+    "EmailNotification",
 ]

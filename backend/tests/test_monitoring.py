@@ -97,7 +97,7 @@ def test_infrastructure_endpoint_requires_authentication(client: TestClient) -> 
     assert client.get("/api/v1/infrastructure/summary").status_code == 401
 
 
-def test_alert_webhook_requires_bearer_token_and_deduplicates(
+def test_alert_webhook_requires_bearer_token_and_correlates_repeats(
     client: TestClient, monkeypatch
 ) -> None:
     monkeypatch.setattr(
@@ -113,10 +113,8 @@ def test_alert_webhook_requires_bearer_token_and_deduplicates(
         "accepted": 1,
         "deduplicated": 0,
     }
-    assert client.post("/api/v1/monitoring/alerts", json=payload, headers=headers).json() == {
-        "accepted": 0,
-        "deduplicated": 1,
-    }
+    repeated = client.post("/api/v1/monitoring/alerts", json=payload, headers=headers)
+    assert repeated.json() == {"accepted": 1, "deduplicated": 0}
 
 
 @pytest.mark.anyio

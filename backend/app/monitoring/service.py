@@ -18,8 +18,10 @@ from app.schemas.monitoring import (
     MetricHistory,
     MetricHistoryPoint,
     MetricReading,
+    VirtualMachineStatus,
 )
 from app.monitoring.docker_observer import DockerObserver
+from app.monitoring.vm_observer import VMObserver
 
 SUMMARY_QUERIES = {
     "cpu_utilization": (
@@ -61,6 +63,7 @@ SUMMARY_QUERIES = {
         "errors_per_second",
     ),
     "uptime": ("time() - node_boot_time_seconds", "seconds"),
+    "temperature_celsius": ("max(node_hwmon_temp_celsius)", "celsius"),
 }
 
 HISTORY_QUERIES = {
@@ -72,10 +75,11 @@ HISTORY_QUERIES = {
 
 
 class MonitoringService:
-    def __init__(self, client: PrometheusClient, settings: Settings, docker_observer: DockerObserver | None = None) -> None:
+    def __init__(self, client: PrometheusClient, settings: Settings, docker_observer: DockerObserver | None = None, vm_observer: VMObserver | None = None) -> None:
         self.client = client
         self.settings = settings
         self.docker_observer = docker_observer
+        self.vm_observer = vm_observer
 
     async def summary(self) -> InfrastructureSummary:
         metrics = [
@@ -90,6 +94,7 @@ class MonitoringService:
             metrics=metrics,
             monitoring_available=available,
             last_successful_collection=max(timestamps) if timestamps else None,
+            vms=await self.vms(),
         )
 
     async def history(self, metric: str, hours: int) -> MetricHistory:
@@ -159,6 +164,8 @@ class MonitoringService:
             "memory_bytes": 'sum by (id) (container_memory_working_set_bytes{image!="",id!=""} or container_memory_usage_bytes{image!="",id!=""})',
             "network_receive_bytes_per_second": 'sum by (id) (rate(container_network_receive_bytes_total{image!="",id!=""}[5m]))',
             "network_transmit_bytes_per_second": 'sum by (id) (rate(container_network_transmit_bytes_total{image!="",id!=""}[5m]))',
+            "block_read_bytes_per_second": 'sum by (id) (rate(container_fs_reads_bytes_total{image!="",id!=""}[5m]))',
+            "block_write_bytes_per_second": 'sum by (id) (rate(container_fs_writes_bytes_total{image!="",id!=""}[5m]))',
         }
         query_results = await asyncio.gather(*(self._container_metric(query) for query in metric_queries.values()))
         measurements = dict(zip(metric_queries, query_results, strict=True))
@@ -179,8 +186,22 @@ class MonitoringService:
                 availability=self._availability(observed_at) if observed_at else "unavailable",
                 image=docker_data.get("image"), exit_code=docker_data.get("exit_code"),
                 labels=docker_data.get("labels", {}), logs=docker_data.get("logs"),
+                compose_service=docker_data.get("compose_service"),
+                memory_limit_bytes=docker_data.get("memory_limit_bytes"),
+                block_read_bytes_per_second=measurements["block_read_bytes_per_second"].get(container_id),
+                block_write_bytes_per_second=measurements["block_write_bytes_per_second"].get(container_id),
+                uptime_seconds=docker_data.get("uptime_seconds"),
+                error=docker_data.get("error"),
             ))
         return output
+
+    async def vms(self) -> list[VirtualMachineStatus]:
+        if not self.vm_observer:
+            return []
+        try:
+            return [VirtualMachineStatus.model_validate(item) for item in await self.vm_observer.list_vms()]
+        except Exception:
+            return []
 
     @staticmethod
     def _normalize_container_id(value: object) -> str | None:
@@ -263,6 +284,11 @@ def assess_health(metrics: list[MetricReading], settings: Settings) -> HealthAss
         "memory_utilization": (settings.memory_warning_percent, settings.memory_critical_percent),
         "disk_utilization": (settings.disk_warning_percent, settings.disk_critical_percent),
     }
+    if "temperature_celsius" in available:
+        thresholds["temperature_celsius"] = (
+            settings.temperature_warning_celsius,
+            settings.temperature_critical_celsius,
+        )
     critical, degraded = [], []
     for name, (warning, critical_threshold) in thresholds.items():
         value = available[name].value

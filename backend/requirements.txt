@@ -22,6 +22,9 @@ python-multipart==0.0.20
 # Vector operations
 qdrant-client==1.20.0
 docker==7.1.0
+# Optional VM inventory binding; the observer still reports an honest empty
+# state when no libvirt socket or domains exist.
+libvirt-python==10.10.0
 pgvector==0.5.1
 numpy==2.2.2
 scikit-learn==1.6.1

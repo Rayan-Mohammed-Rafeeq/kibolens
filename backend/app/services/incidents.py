@@ -393,7 +393,14 @@ class IncidentService:
         """
         fingerprint = alert.fingerprint
         now = datetime.now(UTC)
-        alert_source = "docker_lab" if alert.labels.get("kibolens_lab") == "true" else "alertmanager"
+        if alert.labels.get("kibolens_simulated") == "true":
+            alert_source = "simulation"
+        elif alert.labels.get("kibolens_lab") == "true":
+            alert_source = "docker_lab"
+        elif alert.labels.get("kibolens_source") == "docker":
+            alert_source = "docker"
+        else:
+            alert_source = "alertmanager"
 
         # Extract alert information
         title = alert.annotations.get("summary", alert.labels.get("alertname", "Unknown Alert"))
@@ -418,8 +425,11 @@ class IncidentService:
         if alert.status == "firing":
             if existing:
                 # Update existing incident
-                if now <= existing.last_observed_at:
-                    now = existing.last_observed_at + timedelta(microseconds=1)
+                last_observed = existing.last_observed_at
+                if last_observed.tzinfo is None:
+                    last_observed = last_observed.replace(tzinfo=UTC)
+                if now <= last_observed:
+                    now = last_observed + timedelta(microseconds=1)
                 existing.last_observed_at = now
                 existing.updated_at = now
 

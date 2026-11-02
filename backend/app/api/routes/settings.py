@@ -1,12 +1,18 @@
 """Authenticated, read-only operational settings for the administrator UI."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr
 
 from app.ai.router.core import get_ai_router
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CsrfSession, CurrentUser
 from app.core.config import Settings, get_settings
+from app.services.notifications import send_test_email
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+
+class TestEmailRequest(BaseModel):
+    recipient: EmailStr | None = None
 
 
 @router.get("")
@@ -38,4 +44,28 @@ async def settings_summary(
             "secure_cookie": settings.session_cookie_secure,
             "allowed_email_count": len(settings.get_allowed_emails()),
         },
+        "notifications": {
+            "configured_recipient_count": len(settings.get_incident_notification_emails()),
+            "test_recipient_count": len(settings.get_incident_test_recipient_emails()),
+        },
     }
+
+
+@router.post("/test-email")
+async def test_email(
+    payload: TestEmailRequest,
+    user: CurrentUser,
+    _: CsrfSession,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required.")
+    configured = settings.get_incident_test_recipient_emails()
+    recipient = str(payload.recipient).lower() if payload.recipient else next(iter(configured), None)
+    if not recipient or recipient not in configured:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipient is not configured as an incident test recipient.")
+    try:
+        provider_id = await send_test_email(settings, recipient)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return {"status": "sent", "recipient": recipient, "provider_id": provider_id}

@@ -11,6 +11,7 @@ from app.monitoring.alerts import AlertDeduplicator
 from app.monitoring.prometheus import PrometheusClient
 from app.monitoring.docker_observer import DockerObserver
 from app.monitoring.service import MonitoringService
+from app.monitoring.vm_observer import VMObserver
 from app.schemas.monitoring import (
     AlertmanagerWebhook,
     AlertWebhookResponse,
@@ -18,9 +19,13 @@ from app.schemas.monitoring import (
     InfrastructureSummary,
     MetricHistory,
     MonitoringStatus,
+    VirtualMachineStatus,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
+from app.services.notifications import notify_incident
+from app.models.incident import Incident
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 alerts_router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -33,6 +38,7 @@ def monitoring_service() -> MonitoringService:
         PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
         settings,
         DockerObserver(settings.docker_socket_path) if settings.docker_observer_enabled else None,
+        VMObserver(settings.libvirt_uri) if settings.vm_observer_enabled else None,
     )
 
 
@@ -60,6 +66,11 @@ async def infrastructure_history(
 @router.get("/containers", response_model=list[ContainerStatus])
 async def infrastructure_containers(_: CurrentUser) -> list[ContainerStatus]:
     return await monitoring_service().containers()
+
+
+@router.get("/vms", response_model=list[VirtualMachineStatus])
+async def infrastructure_vms(_: CurrentUser):
+    return await monitoring_service().vms()
 
 
 @router.get("/monitoring-status", response_model=MonitoringStatus)
@@ -108,12 +119,23 @@ async def alertmanager_webhook(
     incident_service = IncidentService(db, monitoring)
     
     processed = 0
+    request_fingerprints: set[str] = set()
     for alert in payload.alerts:
-        # Use deduplicator for idempotency within this request
-        if deduplicator.accept(alert.fingerprint):
+        # Correlation is durable in PostgreSQL; only duplicate entries inside
+        # one webhook payload are discarded here.
+        if alert.fingerprint not in request_fingerprints:
+            request_fingerprints.add(alert.fingerprint)
             try:
+                before = db.scalar(select(Incident).where(
+                    and_(Incident.alert_fingerprint == alert.fingerprint, Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]))
+                ))
+                before_severity = before.severity if before else None
                 incident = incident_service.process_alert(alert)
                 await incident_service.collect_incident_evidence(incident)
+                event_key = "resolved" if alert.status == "resolved" else (
+                    f"severity-{incident.severity.lower()}" if before_severity and before_severity != incident.severity else "firing"
+                )
+                await notify_incident(db, incident, event_key, settings)
                 processed += 1
             except Exception as e:
                 # Log error but continue processing other alerts

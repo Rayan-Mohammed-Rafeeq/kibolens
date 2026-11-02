@@ -185,6 +185,7 @@ export function IncidentsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-zinc-400">
+                      {incident.source === "simulation" && <span className="mr-2 rounded bg-fuchsia-400/15 px-2 py-0.5 text-xs text-fuchsia-200">SIMULATED</span>}
                       {incident.affected_service || (
                         <span className="text-zinc-600">—</span>
                       )}

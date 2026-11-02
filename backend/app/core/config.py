@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     memory_critical_percent: float = Field(default=90, ge=1, le=100)
     disk_warning_percent: float = Field(default=80, ge=1, le=100)
     disk_critical_percent: float = Field(default=90, ge=1, le=100)
+    temperature_warning_celsius: float = Field(default=80, ge=1, le=150)
+    temperature_critical_celsius: float = Field(default=90, ge=1, le=150)
     alert_webhook_token: SecretStr | None = None
 
     # ── Legacy Ollama (kept for rollback; not invoked by default when cloud routing is active) ──
@@ -87,6 +89,9 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr | None = Field(default=None, alias="RESEND_API_KEY")
     email_from: str = Field(default="noreply@example.com")
     email_reply_to: str | None = None
+    public_app_url: str = "https://kibolens.alliededge.app"
+    incident_notification_emails: str = ""
+    incident_test_recipient_emails: str = ""
     allowed_emails: str = Field(
         default=""  # Must be configured via KIBOLENS_ALLOWED_EMAILS
     )
@@ -98,6 +103,8 @@ class Settings(BaseSettings):
     # Docker inspection is optional and only uses the local Engine API socket.
     docker_observer_enabled: bool = True
     docker_socket_path: str = "/var/run/docker.sock"
+    vm_observer_enabled: bool = True
+    libvirt_uri: str = "qemu:///system"
 
     @field_validator("otp_max_attempts", mode="before")
     @classmethod
@@ -136,12 +143,21 @@ class Settings(BaseSettings):
             raise ValueError("Memory warning threshold must be less than its critical threshold.")
         if self.disk_warning_percent >= self.disk_critical_percent:
             raise ValueError("Disk warning threshold must be less than its critical threshold.")
+        if self.temperature_warning_celsius >= self.temperature_critical_celsius:
+            raise ValueError("Temperature warning threshold must be less than its critical threshold.")
         return self
 
     def get_allowed_emails(self) -> set[str]:
         """Parse and normalize allowed email addresses."""
         emails = {email.strip().lower() for email in self.allowed_emails.split(",")}
         return {email for email in emails if email}  # Remove empty strings
+
+    def get_incident_notification_emails(self) -> list[str]:
+        configured = {email.strip().lower() for email in self.incident_notification_emails.split(",") if email.strip()}
+        return sorted(configured or self.get_allowed_emails())
+
+    def get_incident_test_recipient_emails(self) -> set[str]:
+        return {email.strip().lower() for email in self.incident_test_recipient_emails.split(",") if email.strip()}
 
 
 @lru_cache

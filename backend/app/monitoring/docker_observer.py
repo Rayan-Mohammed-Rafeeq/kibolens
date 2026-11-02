@@ -37,6 +37,7 @@ class DockerObserver:
                 state = attrs.get("State", {})
                 health = state.get("Health", {}).get("Status")
                 status = "UNHEALTHY" if health == "unhealthy" else (
+                    "RESTARTING" if state.get("Restarting") else
                     "RUNNING" if state.get("Running") else "STOPPED"
                 )
                 observed = state.get("StartedAt") or state.get("FinishedAt")
@@ -44,6 +45,13 @@ class DockerObserver:
                     observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00")) if observed else None
                 except (AttributeError, ValueError):
                     observed_at = None
+                uptime_seconds = None
+                if state.get("Running") and state.get("StartedAt"):
+                    try:
+                        started_at = datetime.fromisoformat(state["StartedAt"].replace("Z", "+00:00"))
+                        uptime_seconds = max(0.0, (datetime.now(timezone.utc) - started_at).total_seconds())
+                    except (AttributeError, ValueError):
+                        pass
                 output.append({
                     "id": container.id,
                     "name": container.name,
@@ -51,7 +59,11 @@ class DockerObserver:
                     "restart_count": int(attrs.get("RestartCount", 0)),
                     "image": (attrs.get("Config", {}).get("Image") or ""),
                     "labels": {k: v for k, v in (attrs.get("Config", {}).get("Labels") or {}).items() if k.startswith("kibolens.") or k.startswith("com.docker.compose.")},
+                    "compose_service": (attrs.get("Config", {}).get("Labels") or {}).get("com.docker.compose.service"),
+                    "memory_limit_bytes": (attrs.get("HostConfig", {}).get("Memory") or None),
+                    "uptime_seconds": uptime_seconds,
                     "exit_code": state.get("ExitCode"),
+                    "error": state.get("Error") or None,
                     "last_observation": observed_at,
                     "logs": self._logs_sync(container),
                 })
@@ -81,7 +93,7 @@ class DockerObserver:
         try:
             events = client.events(
                 decode=True,
-                filters={"type": ["container"], "label": ["kibolens.lab=true"]},
+                filters={"type": ["container"]},
                 since=since,
                 until=until,
             )
@@ -89,15 +101,13 @@ class DockerObserver:
             for event in events:
                 actor = event.get("Actor", {})
                 attributes = actor.get("Attributes", {})
-                if attributes.get("kibolens.lab") != "true":
-                    continue
                 output.append({
                     "id": actor.get("ID"),
                     "status": event.get("status"),
                     "time": event.get("time"),
                     "name": attributes.get("name") or attributes.get("com.docker.compose.service"),
                     "exit_code": attributes.get("exitCode"),
-                    "labels": {key: value for key, value in attributes.items() if key.startswith("kibolens.")},
+                    "labels": {key: value for key, value in attributes.items() if key.startswith("kibolens.") or key.startswith("com.docker.compose.")},
                 })
             return output
         except Exception as exc:
