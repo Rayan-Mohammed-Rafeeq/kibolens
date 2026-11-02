@@ -484,6 +484,12 @@ class GeminiProvider:
                 "maxOutputTokens": max_tokens,
             },
         }
+        # Gemini 3 includes internal thinking tokens in maxOutputTokens. A
+        # high default thinking level can therefore exhaust the budget before
+        # the visible answer is complete. Infrastructure analysis benefits
+        # from a complete evidence report more than deep hidden reasoning.
+        if model_id.startswith("gemini-3"):
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "minimal"}
         if system_prompt:
             body["system_instruction"] = {"parts": [{"text": system_prompt}]}
 
@@ -527,11 +533,14 @@ class GeminiProvider:
                 "latency_seconds": round(latency, 3),
                 "input_tokens": usage.get("promptTokenCount"),
                 "output_tokens": usage.get("candidatesTokenCount"),
+                "thoughts_tokens": usage.get("thoughtsTokenCount"),
+                "total_tokens": usage.get("totalTokenCount"),
             }
             # Check for safety block
             finish_reason = candidate.get("finishReason", "")
             metadata["finish_reason"] = finish_reason or None
             metadata["incomplete"] = output_limit_reached(finish_reason)
+            metadata["continuation_token"] = candidate.get("continuationToken")
             if finish_reason == "SAFETY":
                 return "", metadata, FailureCategory.SAFETY_REFUSAL
             if output_limit_reached(finish_reason):

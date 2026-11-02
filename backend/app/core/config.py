@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.2:3b"
     ollama_timeout_seconds: float = Field(default=30, gt=0, le=300)
     llm_temperature: float = Field(default=0.1, ge=0, le=1)
-    llm_max_tokens: int = Field(default=4000, ge=100, le=32000)
+    llm_max_tokens: int = Field(default=16000, ge=100, le=32000)
     llm_request_timeout_seconds: float = Field(default=45, gt=0, le=600)
 
     # ── Cloud AI Provider Keys ──────────────────────────────────────────────

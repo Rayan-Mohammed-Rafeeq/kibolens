@@ -160,6 +160,8 @@ async def test_gemini_success(router: AIRouter):
 
         result = await router.generate_text("What is the CPU usage?")
 
+    request_body = instance.post.call_args.kwargs["json"]
+    assert request_body["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal"}
     assert result.successful_provider == ProviderName.GEMINI
     assert result.content == "Found it!"
     assert result.unavailable is False

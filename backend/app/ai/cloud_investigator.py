@@ -384,42 +384,57 @@ class CloudAIInvestigator:
             routing_metadata = response.response_metadata
             findings_text = str(response.content)
 
-            if routing_metadata.get("incomplete") and findings_text.strip():
-                try:
-                    continuation = await self._langchain_model.ainvoke([
-                        *prompt_value.messages,
-                        AIMessage(content=findings_text),
-                        HumanMessage(
-                            content=(
-                                "Continue the same infrastructure analysis from exactly where the "
-                                "previous response stopped. Do not repeat the completed content. "
-                                "Return only the remaining sections and keep observed evidence "
-                                "separate from hypotheses."
-                            )
-                        ),
-                    ])
-                    continuation_metadata = continuation.response_metadata
-                    continuation_text = str(continuation.content)
-                    continuation_available = not continuation_metadata.get("unavailable")
-                    if continuation_available:
-                        findings_text = self._merge_continuation(findings_text, continuation_text)
+            if routing_metadata.get("incomplete"):
+                continuation_count = 0
+                continuation_error = None
+                continuation_messages = list(prompt_value.messages)
+                while routing_metadata.get("incomplete") and continuation_count < 8:
+                    continuation_count += 1
+                    try:
+                        continuation = await self._langchain_model.ainvoke([
+                            *continuation_messages,
+                            AIMessage(content=findings_text),
+                            HumanMessage(
+                                content=(
+                                    "Continue the same infrastructure analysis from exactly where the "
+                                    "previous response stopped. Do not repeat the completed content. "
+                                    "Return only the remaining sections and keep observed evidence "
+                                    "separate from hypotheses. If all required sections are already "
+                                    "complete, finish with a concise uncertainty statement."
+                                )
+                            ),
+                        ])
+                        continuation_metadata = continuation.response_metadata
+                        continuation_text = str(continuation.content)
+                        continuation_available = not continuation_metadata.get("unavailable")
+                        if continuation_available and continuation_text.strip():
+                            findings_text = self._merge_continuation(findings_text, continuation_text)
+                            continuation_messages = [
+                                *continuation_messages,
+                                AIMessage(content=continuation_text),
+                            ]
+                        routing_metadata = {
+                            **routing_metadata,
+                            "continuation_used": True,
+                            "continuation_count": continuation_count,
+                            "continuation_provider": continuation_metadata.get("provider"),
+                            "continuation_model": continuation_metadata.get("model"),
+                            "continuation_finish_reason": continuation_metadata.get("finish_reason"),
+                            "continuation_incomplete": continuation_metadata.get("incomplete", False),
+                            "continuation_error": continuation_metadata.get("error") if not continuation_available else None,
+                            "incomplete": (continuation_metadata.get("incomplete", False) if continuation_available else True),
+                            "incomplete_reason": continuation_metadata.get("incomplete_reason") or "continuation_unavailable",
+                        }
+                        if not continuation_available or not continuation_text.strip():
+                            break
+                    except Exception as exc:
+                        continuation_error = type(exc).__name__
+                        logger.warning("AI continuation failed; preserving generated response: %s", exc)
+                        break
+                if continuation_error:
                     routing_metadata = {
                         **routing_metadata,
-                        "continuation_used": True,
-                        "continuation_provider": continuation_metadata.get("provider"),
-                        "continuation_model": continuation_metadata.get("model"),
-                        "continuation_finish_reason": continuation_metadata.get("finish_reason"),
-                        "continuation_incomplete": continuation_metadata.get("incomplete", False),
-                        "continuation_error": continuation_metadata.get("error") if not continuation_available else None,
-                        "incomplete": (continuation_metadata.get("incomplete", False) if continuation_available else True),
-                        "incomplete_reason": continuation_metadata.get("incomplete_reason") or "continuation_unavailable",
-                    }
-                except Exception as exc:
-                    logger.warning("Bounded AI continuation failed; preserving first response: %s", exc)
-                    routing_metadata = {
-                        **routing_metadata,
-                        "continuation_used": False,
-                        "continuation_error": type(exc).__name__,
+                        "continuation_error": continuation_error,
                         "incomplete": True,
                         "incomplete_reason": "continuation_failed",
                     }
@@ -427,7 +442,7 @@ class CloudAIInvestigator:
                     separator = "" if findings_text.endswith("\n") else "\n"
                     findings_text = (
                         f"{findings_text}{separator}\n> **Response status:** The provider stopped at its "
-                        "output-token limit after one bounded continuation. The content above "
+                        f"output-token limit after {continuation_count} bounded continuation(s). The content above "
                         "is the complete response returned by the providers but may be incomplete."
                     )
 
