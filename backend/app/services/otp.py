@@ -229,7 +229,9 @@ def can_resend_otp(
     if now >= cooldown_expires:
         return True, 0
     
-    seconds_remaining = int((cooldown_expires - now).total_seconds())
+    # A blocked request should always communicate at least one second left;
+    # truncating a sub-second remainder to zero makes clients retry too early.
+    seconds_remaining = max(1, int((cooldown_expires - now).total_seconds() + 0.999999))
     return False, seconds_remaining
 
 

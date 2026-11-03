@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ChevronDown, ChevronRight, Server } from "lucide-react";
-import { useState } from "react";
+import { Activity, ChevronDown, ChevronLeft, ChevronRight, Server } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MarkdownRenderer } from "../components/markdown-renderer";
@@ -11,9 +11,20 @@ import type { ContainerStatus, MetricHistory } from "../types/monitoring";
 export function InfrastructurePage() {
   const cpu = useQuery({ queryKey: ["metric-history", "cpu"], queryFn: () => monitoringService.history("cpu_utilization"), refetchInterval: 60_000 });
   const memory = useQuery({ queryKey: ["metric-history", "memory"], queryFn: () => monitoringService.history("memory_utilization"), refetchInterval: 60_000 });
-  const containers = useQuery({ queryKey: ["containers"], queryFn: monitoringService.containers, refetchInterval: 30_000 });
+  const containers = useQuery({ queryKey: ["containers"], queryFn: monitoringService.containers, refetchInterval: 30_000, staleTime: 10_000, refetchIntervalInBackground: false });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const totalContainers = containers.data?.length ?? 0;
+  const pageCount = Math.max(1, Math.ceil(totalContainers / pageSize));
+  const pageItems = containers.data?.slice((page - 1) * pageSize, page * pageSize) ?? [];
+  useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
   const selected = containers.data?.find((container) => container.id === selectedId);
+  const selectedDetails = useQuery({
+    queryKey: ["container-details", selected?.id],
+    queryFn: () => monitoringService.containerDetails(selected!.id!),
+    enabled: Boolean(selected),
+  });
 
   const relatedIncidents = useQuery({
     queryKey: ["container-incidents", selected?.id, selected?.compose_service, selected?.name],
@@ -32,11 +43,12 @@ export function InfrastructurePage() {
     </div>
 
     <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40">
-      <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Container inventory</h2><span className="ml-auto text-xs text-zinc-500">{containers.data?.length ?? 0} Docker container(s)</span></header>
-      {containers.isLoading ? <p className="p-5 text-sm text-zinc-500">Loading canonical container inventory…</p> : containers.data?.length ? <div className="divide-y divide-zinc-800">{containers.data.map((container) => <ContainerRow key={container.id ?? container.name} container={container} selected={container.id === selectedId} onSelect={() => setSelectedId(container.id === selectedId ? null : container.id)} />)}</div> : <p className="p-5 text-sm text-zinc-500">No current Docker inventory is available. No containers are being fabricated.</p>}
+      <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Container inventory</h2><span className="ml-auto text-xs text-zinc-500">{containers.isLoading ? "Loading inventory…" : `${totalContainers} Docker container(s)`}</span></header>
+      {containers.isLoading && !containers.data ? <div className="space-y-3 p-5"><InventorySkeleton /><InventorySkeleton /><InventorySkeleton /></div> : containers.isError ? <div className="p-5"><p className="text-sm text-red-300">Docker inventory could not be loaded.</p><p className="mt-1 text-xs text-zinc-500">{(containers.error as Error).message}</p></div> : totalContainers ? <><div className="divide-y divide-zinc-800">{pageItems.map((container) => <ContainerRow key={container.id ?? container.name} container={container} selected={container.id === selectedId} onSelect={() => setSelectedId(container.id === selectedId ? null : container.id)} />)}</div><div className="flex items-center justify-between border-t border-zinc-800 px-5 py-3 text-xs text-zinc-500"><span>Page {page} of {pageCount}</span><div className="flex gap-2"><button type="button" aria-label="Previous container page" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="rounded border border-zinc-700 p-1.5 hover:border-cyan-400 disabled:opacity-30"><ChevronLeft size={15} /></button><button type="button" aria-label="Next container page" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page === pageCount} className="rounded border border-zinc-700 p-1.5 hover:border-cyan-400 disabled:opacity-30"><ChevronRight size={15} /></button></div></div></> : <p className="p-5 text-sm text-zinc-500">No containers found. Docker may be unavailable or no containers are currently running.</p>}
+      {containers.isFetching && !containers.isLoading && <p className="border-t border-zinc-800 px-5 py-2 text-xs text-cyan-300">Refreshing inventory in the background…</p>}
     </section>
 
-    {selected && <ContainerDetails container={selected} incidents={relatedIncidents.data?.incidents ?? []} incidentsLoading={relatedIncidents.isLoading} />}
+     {selected && <ContainerDetails container={{ ...selected, ...(selectedDetails.data ?? {}) }} incidents={relatedIncidents.data?.incidents ?? []} incidentsLoading={relatedIncidents.isLoading} />}
 
     <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Virtual machines</h2></header>
@@ -63,10 +75,10 @@ function ContainerRow({ container, selected, onSelect }: { container: ContainerS
         <Badge label={container.health === "NO_CHECK" ? "NO HEALTHCHECK" : container.health} tone={container.health === "HEALTHY" ? "green" : container.health === "UNHEALTHY" ? "red" : "amber"} />
       </div>
     </div>
-    <div className="mt-3 grid gap-2 text-sm text-zinc-400 sm:grid-cols-2 lg:grid-cols-4">
+     <div className="mt-3 grid gap-2 text-sm text-zinc-400 sm:grid-cols-2 lg:grid-cols-4">
       <span>CPU {display(container.cpu_percent, "%")}</span><span>Memory {displayBytes(container.memory_bytes)}{container.memory_limit_bytes ? ` / ${displayBytes(container.memory_limit_bytes)}` : ""}</span><span>RX {displayBytes(container.network_receive_bytes_per_second)}/s</span><span>TX {displayBytes(container.network_transmit_bytes_per_second)}/s</span>
     </div>
-    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500"><span>Telemetry: {container.availability}</span><span>Restarts: {container.restart_count ?? "—"}</span><span>Uptime: {formatUptime(container.uptime_seconds)}</span>{container.exit_code !== null && container.exit_code !== undefined && <span>Exit: {container.exit_code}</span>}</div>
+     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500"><span>Telemetry: {container.availability === "unavailable" ? "unavailable" : container.availability}</span><span>Restarts: {container.restart_count ?? "—"}</span><span>Uptime: {formatUptime(container.uptime_seconds)}</span>{container.exit_code !== null && container.exit_code !== undefined && <span>Exit: {container.exit_code}</span>}</div>
     {container.error && <p className="mt-2 truncate text-xs text-red-300">{container.error}</p>}
   </button>;
 }
@@ -81,3 +93,4 @@ function display(value: number | null, suffix = ""): string { return value === n
 function displayBytes(value: number | null): string { return value === null ? "—" : value > 1_048_576 ? `${(value / 1_048_576).toFixed(1)} MiB` : `${value.toFixed(0)} B`; }
 function formatUptime(value?: number | null): string { if (value === null || value === undefined) return "—"; const hours = Math.floor(value / 3600); const minutes = Math.floor((value % 3600) / 60); return hours ? `${hours}h ${minutes}m` : `${minutes}m`; }
 function HistoryChart({ title, history, loading }: { title: string; history?: MetricHistory; loading: boolean }) { const data = history?.points.map((point) => ({ ...point, label: new Date(point.timestamp).toLocaleTimeString() })) ?? []; return <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5"><div className="flex items-center gap-2"><Activity size={17} className="text-cyan-300" /><h2 className="font-medium">{title}</h2></div>{loading ? <p className="grid h-56 place-items-center text-sm text-zinc-500">Loading historical telemetry…</p> : history?.availability === "available" && data.length ? <div className="mt-5 h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><XAxis dataKey="label" hide /><YAxis width={32} /><Tooltip /><Line dataKey="value" stroke="#22d3ee" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></div> : <p className="grid h-56 place-items-center text-center text-sm text-zinc-500">Historical telemetry is unavailable. No chart data is fabricated.</p>}</article>; }
+function InventorySkeleton() { return <div className="h-24 animate-pulse rounded-lg bg-zinc-800/60" />; }

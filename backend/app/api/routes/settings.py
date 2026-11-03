@@ -59,7 +59,6 @@ async def settings_summary(
         },
         "notifications": {
             "configured_recipient_count": len(settings.get_incident_notification_emails()),
-            "test_recipient_count": len(settings.get_incident_test_recipient_emails()),
             "provider_configured": bool(settings.resend_api_key),
             "account_email": user.email,
             "email_verified": user.email_verified_at is not None,

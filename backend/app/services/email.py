@@ -1,12 +1,9 @@
-"""
-Email service using Resend for transactional email delivery.
+"""Transactional email delivery and branded KiboLens templates."""
 
-Security notes:
-- Never logs email content or OTP codes
-- Uses Resend Python SDK or HTTP API
-- Fails closed: no silent fallback if sending fails
-"""
+from __future__ import annotations
+
 import logging
+from html import escape
 from typing import Protocol
 
 import httpx
@@ -16,112 +13,32 @@ logger = logging.getLogger(__name__)
 
 class EmailSendError(Exception):
     """Raised when email sending fails."""
-    pass
 
 
 class EmailServiceProtocol(Protocol):
-    """Protocol for email service implementations."""
-    
-    def send_otp_email(self, to_email: str, otp_code: str) -> None:
-        """
-        Send OTP code via email.
-        
-        Args:
-            to_email: Recipient email address
-            otp_code: Six-digit OTP code
-            
-        Raises:
-            EmailSendError: If email cannot be sent
-        """
-        ...
+    def send_otp_email(self, to_email: str, otp_code: str) -> None: ...
 
 
 class ResendEmailService:
-    """
-    Email service using Resend API.
-    
-    Uses HTTP API directly for minimal dependencies and explicit control.
-    """
-    
+    """Email service using the Resend HTTP API."""
+
     def __init__(self, api_key: str, from_email: str, reply_to: str | None = None):
         self.api_key = api_key
         self.from_email = from_email
         self.reply_to = reply_to or from_email
         self.base_url = "https://api.resend.com"
-        
+
     def send_otp_email(self, to_email: str, otp_code: str) -> None:
-        """Send OTP verification email via Resend."""
-        # Mask email for logging (show first 2 chars + domain)
-        email_parts = to_email.split('@')
-        masked_email = f"{email_parts[0][:2]}***@{email_parts[1]}" if len(email_parts) == 2 else "***"
-        
-        logger.info(f"Sending OTP email to {masked_email}")
-        
-        # Email content
-        subject = "KiboLens - Your verification code"
-        
-        # Plain text version
-        text_body = f"""Your KiboLens verification code is: {otp_code}
-
-This code will expire in 5 minutes.
-
-If you didn't request this code, please ignore this email.
-
----
-KiboLens Incident Management System
-"""
-        
-        # HTML version
-        html_body = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px; text-align: center;">
-        <h1 style="color: #2563eb; margin: 0 0 20px 0;">KiboLens</h1>
-        <p style="font-size: 16px; color: #666; margin: 0 0 30px 0;">Your verification code</p>
-        
-        <div style="background-color: white; padding: 30px; border-radius: 8px; margin: 0 0 30px 0; border: 2px solid #e5e7eb;">
-            <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 0; font-family: 'Courier New', monospace; color: #1e40af;">
-                {otp_code}
-            </p>
-        </div>
-        
-        <p style="font-size: 14px; color: #666; margin: 0 0 10px 0;">
-            This code will expire in <strong>5 minutes</strong>.
-        </p>
-        
-        <p style="font-size: 14px; color: #999; margin: 30px 0 0 0;">
-            If you didn't request this code, please ignore this email.
-        </p>
-    </div>
-    
-    <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-        <p style="font-size: 12px; color: #999; margin: 0;">
-            KiboLens Incident Management System
-        </p>
-    </div>
-</body>
-</html>"""
-        
-        self._send_email(to_email, subject, text_body, html_body)
+        self._send_email(to_email, "KiboLens - Your verification code", *render_otp_email(otp_code))
 
     def send_incident_email(
-        self,
-        to_email: str,
-        subject: str,
-        text_body: str,
-        html_body: str,
+        self, to_email: str, subject: str, text_body: str, html_body: str
     ) -> str:
-        """Send an incident notification and return Resend's message ID."""
         return self._send_email(to_email, subject, text_body, html_body)
 
     def _send_email(self, to_email: str, subject: str, text_body: str, html_body: str) -> str:
-        # Send via Resend API
-        email_parts = to_email.split("@")
-        masked_email = f"{email_parts[0][:2]}***@{email_parts[1]}" if len(email_parts) == 2 else "***"
+        parts = to_email.split("@")
+        masked = f"{parts[0][:2]}***@{parts[1]}" if len(parts) == 2 else "***"
         try:
             with httpx.Client(timeout=10.0) as client:
                 response = client.post(
@@ -139,57 +56,67 @@ KiboLens Incident Management System
                         "html": html_body,
                     },
                 )
-                
                 if response.status_code not in (200, 201):
-                    logger.error(
-                        f"Resend API error: status={response.status_code}, "
-                        f"response={response.text[:200]}"
-                    )
+                    logger.error("Resend API error: status=%s response=%s", response.status_code, response.text[:200])
                     raise EmailSendError(f"Failed to send email: HTTP {response.status_code}")
-                    
-                logger.info(f"Email sent successfully to {masked_email}")
+                logger.info("Email accepted by provider for %s", masked)
                 return str(response.json().get("id", ""))
-                
-        except httpx.TimeoutException as e:
-            logger.error(f"Resend API timeout: {e}")
-            raise EmailSendError("Email service timeout") from e
-        except httpx.RequestError as e:
-            logger.error(f"Resend API request error: {e}")
-            raise EmailSendError("Email service unavailable") from e
-        except Exception as e:
-            logger.error(f"Unexpected error sending email: {e}")
-            raise EmailSendError("Failed to send email") from e
+        except EmailSendError:
+            raise
+        except httpx.TimeoutException as exc:
+            logger.error("Resend API timeout: %s", exc)
+            raise EmailSendError("Email service timeout") from exc
+        except httpx.RequestError as exc:
+            logger.error("Resend API request error: %s", exc)
+            raise EmailSendError("Email service unavailable") from exc
+        except Exception as exc:
+            logger.error("Unexpected error sending email: %s", exc)
+            raise EmailSendError("Failed to send email") from exc
 
 
 class MockEmailService:
-    """
-    Mock email service for testing.
-    
-    Stores sent emails in memory instead of actually sending them.
-    """
-    
+    """In-memory email service used by tests."""
+
     def __init__(self):
         self.sent_emails: list[dict[str, str]] = []
-        
+
     def send_otp_email(self, to_email: str, otp_code: str) -> None:
-        """Record email instead of sending it."""
-        self.sent_emails.append({
-            "to": to_email,
-            "otp": otp_code,
-        })
-        logger.info(f"Mock: OTP email recorded for {to_email}")
+        self.sent_emails.append({"to": to_email, "otp": otp_code})
 
     def send_incident_email(self, to_email: str, subject: str, text_body: str, html_body: str) -> str:
         self.sent_emails.append({"to": to_email, "subject": subject, "text": text_body, "html": html_body})
         return "mock-email-id"
-        
+
     def get_last_otp(self, email: str) -> str | None:
-        """Get the last OTP sent to an email address (test helper)."""
         for sent in reversed(self.sent_emails):
-            if sent["to"] == email:
+            if sent["to"] == email and "otp" in sent:
                 return sent["otp"]
         return None
-        
+
     def clear(self) -> None:
-        """Clear sent email history (test helper)."""
         self.sent_emails.clear()
+
+
+def render_otp_email(otp_code: str) -> tuple[str, str]:
+    """Return mobile-safe plain text and inline-styled HTML OTP content."""
+    safe_code = escape(otp_code)
+    text = (
+        f"Your KiboLens verification code is {otp_code}.\n\n"
+        "This code expires in 5 minutes. If you did not request it, you can safely ignore this email.\n\n"
+        "KiboLens - Secure infrastructure operations"
+    )
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#0b1220;color:#dbeafe;font-family:Arial,Helvetica,sans-serif;line-height:1.5">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0b1220"><tr><td align="center" style="padding:32px 16px">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#111827;border:1px solid #26354d;border-radius:14px;overflow:hidden">
+<tr><td style="padding:22px 28px;background:#0f1c33;border-bottom:1px solid #26354d"><strong style="font-size:20px;color:#67e8f9">KiboLens</strong><span style="float:right;font-size:12px;color:#94a3b8">SECURE ACCESS</span></td></tr>
+<tr><td style="padding:36px 28px;text-align:center"><p style="margin:0;color:#94a3b8;font-size:13px;text-transform:uppercase;letter-spacing:1.5px">Verification code</p><div style="margin:22px 0;padding:20px;background:#0b1220;border:1px solid #22d3ee;border-radius:10px"><span style="font-family:Courier New,monospace;font-size:32px;letter-spacing:8px;font-weight:bold;color:#f8fafc">{safe_code}</span></div><p style="margin:0;color:#cbd5e1;font-size:15px">This code expires in <strong style="color:#67e8f9">5 minutes</strong>.</p><p style="margin:24px 0 0;color:#64748b;font-size:13px">If you did not request this code, you can safely ignore this email.</p></td></tr>
+<tr><td style="padding:18px 28px;border-top:1px solid #26354d;color:#64748b;font-size:12px">KiboLens - Secure infrastructure operations</td></tr></table>
+</td></tr></table></body></html>"""
+    return text, html
+
+
+def render_test_email() -> tuple[str, str]:
+    text = "KiboLens test notification\n\nThis confirms that the configured email provider can accept KiboLens notifications. No infrastructure action was performed."
+    html = """<!doctype html><html><body style="margin:0;background:#0b1220;color:#dbeafe;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" style="max-width:560px;background:#111827;border:1px solid #26354d;border-radius:14px;padding:32px"><tr><td><strong style="font-size:20px;color:#67e8f9">KiboLens</strong><h1 style="color:#f8fafc;font-size:24px;margin:32px 0 12px">Test notification</h1><p style="color:#cbd5e1">Your configured email provider accepted this test message. No infrastructure action was performed.</p><p style="color:#64748b;font-size:12px;margin-top:32px">KiboLens - Secure infrastructure operations</p></td></tr></table></td></tr></table></body></html>"""
+    return text, html

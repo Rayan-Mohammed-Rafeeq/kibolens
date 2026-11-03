@@ -85,7 +85,7 @@ async def _observe_container_events(settings) -> None:
                         incident = service.process_alert(alert)
                         container_details = next(
                             (
-                                item for item in await observer.list_containers()
+                                item for item in await observer.list_containers(include_details=True)
                                 if item.get("id", "").lstrip("/").removeprefix("docker/") == event_id
                             ),
                             {},
@@ -107,8 +107,10 @@ async def _observe_container_events(settings) -> None:
                             },
                         )
                         await service.collect_incident_evidence(incident)
-                        if not is_lab or labels.get("kibolens.lab.notify_account") == "true":
-                            await notify_incident(db, incident, "firing", settings)
+                        # Lab incidents use the same configured owner delivery
+                        # path as real incidents; delivery is never controlled
+                        # by a browser checkbox or the signed-in administrator.
+                        await notify_incident(db, incident, "firing", settings)
                         db.commit()
                     elif recovery:
                         existing = db.scalar(select(Incident).where(
@@ -123,8 +125,7 @@ async def _observe_container_events(settings) -> None:
                                 annotations={"summary": f"Docker container {event.get('name') or event_id} recovered"},
                             )
                             resolved = service.process_alert(alert)
-                            if not is_lab or labels.get("kibolens.lab.notify_account") == "true":
-                                await notify_incident(db, resolved, "resolved", settings)
+                            await notify_incident(db, resolved, "resolved", settings)
                             db.commit()
                 finally:
                     db.close()

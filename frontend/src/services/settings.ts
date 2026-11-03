@@ -8,7 +8,6 @@ export interface SettingsSummary {
   authentication: { otp_ttl_seconds: number; secure_cookie: boolean; allowed_email_count: number };
   notifications: {
     configured_recipient_count: number;
-    test_recipient_count: number;
     provider_configured: boolean;
     account_email: string | null;
     email_verified: boolean;

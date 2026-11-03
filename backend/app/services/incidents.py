@@ -1,13 +1,11 @@
 import logging
 from datetime import datetime, timedelta
 from datetime import timezone as tz
-from typing import Literal
 from uuid import UUID
 
 UTC = tz.utc
 
-from sqlalchemy import and_, desc, func, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.incident import (
@@ -530,7 +528,7 @@ class IncidentService:
 
             # Collect evidence if monitoring service is available
             if self.monitoring_service:
-                self._collect_incident_evidence(incident)
+                self._collect_incident_evidence(incident, alert)
 
         else:  # resolved
             if existing:
@@ -580,7 +578,7 @@ class IncidentService:
         }
         return severity_map.get(severity_label.lower(), "WARNING")  # type: ignore
 
-    def _collect_incident_evidence(self, incident: Incident) -> None:
+    def _collect_incident_evidence(self, incident: Incident, alert: AlertmanagerAlert | None = None) -> None:
         """
         Collect available telemetry evidence for an incident.
 
@@ -602,6 +600,25 @@ class IncidentService:
                     "title": incident.title,
                 },
             )
+            # Alertmanager integrations may include the evaluated sample in an
+            # annotation. Preserve it as real evidence when present; live
+            # collection below remains the fallback when no value is supplied.
+            raw_value = alert.annotations.get("value") if alert else None
+            if raw_value is not None:
+                try:
+                    self.capture_evidence(
+                        incident_id=incident.id,
+                        evidence_type="HOST_METRIC",
+                        source="prometheus",
+                        resource_identifier=incident.affected_host or incident.affected_service,
+                        metric_name=alert.annotations.get("metric", alert.labels.get("alertname")),
+                        metric_value=float(raw_value),
+                        unit=alert.annotations.get("unit"),
+                        observed_at=datetime.now(UTC),
+                        metadata={"alert_value": True, "fingerprint": incident.alert_fingerprint},
+                    )
+                except (TypeError, ValueError):
+                    logger.debug("Alert value was not numeric for incident %s", incident.id)
 
             # Prometheus and Docker collection are asynchronous. The webhook
             # awaits collect_incident_evidence() after alert correlation.

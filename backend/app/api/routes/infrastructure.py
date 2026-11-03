@@ -9,7 +9,7 @@ from app.api.dependencies import CurrentUser, get_db
 from app.core.config import get_settings
 from app.monitoring.alerts import AlertDeduplicator
 from app.monitoring.prometheus import PrometheusClient
-from app.monitoring.docker_observer import DockerObserver
+from app.monitoring.docker_observer import DockerObserver, DockerObserverError
 from app.monitoring.service import MonitoringService
 from app.monitoring.vm_observer import VMObserver
 from app.schemas.monitoring import (
@@ -23,10 +23,8 @@ from app.schemas.monitoring import (
     VMInventoryResponse,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.services.notifications import notify_incident
-from app.models.incident import Incident
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 alerts_router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -67,6 +65,15 @@ async def infrastructure_history(
 @router.get("/containers", response_model=list[ContainerStatus])
 async def infrastructure_containers(_: CurrentUser) -> list[ContainerStatus]:
     return await monitoring_service().containers()
+
+
+@router.get("/containers/{container_id}/details")
+async def infrastructure_container_details(container_id: str, _: CurrentUser) -> dict:
+    observer = DockerObserver(get_settings().docker_socket_path)
+    try:
+        return {"id": container_id, **await observer.container_details(container_id)}
+    except DockerObserverError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.get("/vms", response_model=list[VirtualMachineStatus])
