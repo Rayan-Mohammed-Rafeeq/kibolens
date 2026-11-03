@@ -1,7 +1,7 @@
 """Optional-at-runtime, read-only libvirt observer.
 
 The production image includes the Python binding, but hosts without a libvirt
-daemon or socket return an explicit unavailable inventory. No VM is inferred
+daemon or socket return an explicit unconfigured inventory. No VM is inferred
 from Docker or Prometheus labels.
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -17,12 +18,18 @@ logger = logging.getLogger(__name__)
 
 
 class VMObserver:
-    def __init__(self, uri: str = "qemu:///system") -> None:
+    def __init__(
+        self,
+        uri: str = "qemu:///system",
+        socket_path: str = "/var/run/libvirt/libvirt-sock-ro",
+    ) -> None:
         self.uri = uri
+        self.socket_path = socket_path
         self._previous_cpu: dict[str, tuple[int, float]] = {}
         self._active_since: dict[str, float] = {}
         self.last_error: str | None = None
         self.is_unconfigured: bool = False
+        self.availability: str = "unconfigured"
 
     @staticmethod
     def _libvirt():
@@ -44,9 +51,27 @@ class VMObserver:
             f"could not be queried.{detail}"
         )
 
+    def _integration_is_configured(self) -> bool:
+        """A missing local libvirt socket means no hypervisor is configured."""
+        if not self.socket_path or not self.uri.startswith("qemu:///"):
+            return True
+        try:
+            if os.path.exists(self.socket_path):
+                return True
+            if self.socket_path.endswith("-ro") and os.path.exists(self.socket_path[:-3]):
+                return True
+            return False
+        except PermissionError:
+            return True
+
     def _list_sync(self) -> list[dict]:
         self.last_error = None
         self.is_unconfigured = False
+        self.availability = "unconfigured"
+        if not self._integration_is_configured():
+            self.is_unconfigured = True
+            return []
+        self.availability = "unavailable"
         libvirt = self._libvirt()
         if libvirt is None:
             self.last_error = (
@@ -59,9 +84,8 @@ class VMObserver:
         try:
             connection = libvirt.openReadOnly(self.uri)
             if connection is None:
-                # Socket absent or libvirt not configured - treat as unconfigured
-                logger.info("libvirt socket not available, treating as unconfigured VM integration")
-                self.is_unconfigured = True
+                self.availability = "unavailable"
+                self.last_error = self._connection_error()
                 return []
             now = time.monotonic()
             observed_at = datetime.now(timezone.utc)
@@ -71,6 +95,7 @@ class VMObserver:
                     output.append(self._inspect_domain(domain, libvirt, now, observed_at))
                 except Exception as exc:
                     logger.debug("Unable to inspect libvirt domain: %s", exc)
+            self.availability = "available"
             return output
         except Exception as exc:
             self.last_error = self._connection_error(str(exc))

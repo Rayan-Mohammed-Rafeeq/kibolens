@@ -63,13 +63,12 @@ docker compose --env-file .env -f deployment/docker-compose.yml up -d backend
 
 The backend passes `KIBOLENS_LIBVIRT_SOCKET_GID` as a supplementary numeric
 group, so a host using a nonstandard libvirt group remains accessible without
-changing container group IDs. If the socket or daemon is absent, startup and
-Docker monitoring continue normally; once libvirt is installed and authorized,
-the next inventory poll discovers domains automatically. An available daemon
-with no domains is shown as an honest empty inventory.
-
-If the host has no libvirt daemon or no domains, the observer continues to
-distinguish unavailable monitoring from an available empty VM inventory.
+changing container group IDs. A missing socket or unconfigured hypervisor is
+reported as `unconfigured` and the UI shows **No virtual machines detected.**
+An available daemon with no domains shows the same empty state. A socket-present
+connection or permission failure remains `unavailable` with an actionable
+diagnostic. Once libvirt is installed and authorized, the next inventory poll
+discovers domains automatically.
 
 Build the isolated lab image once; this does not start a scenario:
 
@@ -86,6 +85,15 @@ authentication flow, then verify:
 1. **Overview** shows current Prometheus host metrics.
 2. **Infrastructure** shows Docker containers and the optional libvirt VM list.
 3. If no libvirt domains exist, the VM panel must show the honest empty state.
+4. **Settings** shows the signed-in account email, verification state, incident
+   notification toggle, minimum severity and recovery-notification preference.
+
+Incident email delivery uses the verified account email and the configured
+Resend sender. No recipient is accepted from the browser. Verify the account
+email through Settings if needed, enable notifications, and use **Send test to
+my account email**. Failed Resend deliveries remain persisted for retry; a
+notification is sent once for a new incident or severity escalation rather
+than on every monitoring poll.
 
 ## 4. Run the controlled failure demonstration
 
@@ -104,9 +112,11 @@ docker events --since 2m --until now --filter container=kibolens-lab-interview-d
 
 The Docker observer polls the event, correlates the stable lab fingerprint,
 captures the stopped container's ID, exit code, restart state and logs, and
-creates one persistent incident. The configured incident recipient receives
-the Resend notification. Open the incident from **Incidents** and confirm the
-evidence timeline.
+creates one persistent incident. If **Send demo email to my account email** is
+enabled, the verified account receives a clearly labelled `[SIMULATED]`
+notification. The lab result reports whether the incident was created and
+whether email delivery was sent, pending, not configured or failed. Open the
+incident from **Incidents** and confirm the evidence timeline.
 
 ## 5. Investigate with AI
 

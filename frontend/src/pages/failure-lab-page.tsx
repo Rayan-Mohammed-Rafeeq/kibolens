@@ -3,14 +3,15 @@ import { Play, RotateCcw, ShieldCheck, Square } from "lucide-react";
 import { useState } from "react";
 import { labScenarios, labService, type LabScenario } from "../services/lab";
 
-const physicalScenarioKeys = new Set<LabScenario>(["container-crash", "container-restart-loop", "container-unhealthy", "application-config-failure"]);
+const physicalScenarioKeys = new Set<LabScenario>(["interview-demo", "container-crash", "container-restart-loop", "container-unhealthy", "application-config-failure"]);
 
 export function FailureLabPage() {
   const client = useQueryClient();
   const status = useQuery({ queryKey: ["lab-status"], queryFn: labService.status, refetchInterval: 5000 });
   const [physical, setPhysical] = useState(false);
   const [notifyDemo, setNotifyDemo] = useState(false);
-  const start = useMutation({ mutationFn: ({ scenario, physical: usePhysical }: { scenario: LabScenario; physical: boolean }) => labService.start(scenario, usePhysical, notifyDemo), onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
+  const [lastResult, setLastResult] = useState<{ name: string; status: string; incident_id?: string; notification?: { status: string; detail?: string } } | null>(null);
+  const start = useMutation({ mutationFn: ({ scenario, physical: usePhysical }: { scenario: LabScenario; physical: boolean }) => labService.start(scenario, usePhysical, notifyDemo), onSuccess: (result) => { setLastResult(result); void client.invalidateQueries({ queryKey: ["lab-status"] }); } });
   const stop = useMutation({ mutationFn: labService.stop, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
   const recover = useMutation({ mutationFn: labService.recover, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
   const reset = useMutation({ mutationFn: labService.reset, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
@@ -23,9 +24,10 @@ export function FailureLabPage() {
     <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-200">
       <ShieldCheck size={17} />
       <span>Administrator-only and CSRF-protected.</span>
-      <label className="flex items-center gap-2"><input type="checkbox" checked={notifyDemo} onChange={(event) => setNotifyDemo(event.target.checked)} />Send demo email to configured test recipients</label>
+      <label className="flex items-center gap-2"><input type="checkbox" checked={notifyDemo} onChange={(event) => setNotifyDemo(event.target.checked)} />Send demo email to my account email</label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={physical} onChange={(event) => setPhysical(event.target.checked)} />Use isolated Docker lab where supported</label>
     </div>
+    {lastResult && <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3 text-sm text-cyan-100">{lastResult.name}: incident {lastResult.incident_id ? "created" : "not created"}; email {lastResult.notification?.status ?? "not requested"}{lastResult.notification?.detail ? ` — ${lastResult.notification.detail}` : ""}.</div>}
     <div className="mt-6 grid gap-3 md:grid-cols-2">
       {labScenarios.map((scenario) => {
         const item = active.get(scenario);
@@ -43,6 +45,7 @@ export function FailureLabPage() {
             </div>
           </div>
           {item?.incident_id && <a className="mt-3 inline-block text-xs text-cyan-300 hover:text-cyan-200" href={`/incidents/${item.incident_id}`}>Open simulated incident →</a>}
+          {item?.notification && <p className={`mt-2 text-xs ${item.notification.status === "sent" || item.notification.status === "pending" ? "text-emerald-300" : "text-amber-200"}`}>Email: {item.notification.status}{item.notification.detail ? ` — ${item.notification.detail}` : ""}</p>}
           {item?.logs && <pre className="mt-3 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-xs text-zinc-500">{item.logs}</pre>}
         </article>;
       })}

@@ -6,15 +6,49 @@ import asyncio
 from html import escape
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models.incident import Incident
+from app.models.incident import EvidenceRecord, Incident
 from app.models.notification import EmailNotification
+from app.models.user import User
 from app.services.email import MockEmailService, ResendEmailService
 
 UTC = timezone.utc
+SEVERITY_RANK = {"INFO": 0, "WARNING": 1, "HIGH": 2, "CRITICAL": 3}
+
+
+def _account_is_eligible(user: User, incident: Incident, event_key: str) -> bool:
+    if not user.email or not user.email_verified_at or not user.incident_notifications_enabled:
+        return False
+    if event_key == "resolved":
+        return user.recovery_notifications_enabled
+    minimum = SEVERITY_RANK.get(user.incident_notification_min_severity.upper(), 1)
+    return SEVERITY_RANK.get(incident.severity, 1) >= minimum
+
+
+def notification_recipients(
+    db: Session,
+    incident: Incident,
+    event_key: str,
+    user: User | None = None,
+    configured_recipients: list[str] | None = None,
+    settings: Settings | None = None,
+) -> list[str]:
+    """Resolve recipients from verified account records, never request data."""
+    if configured_recipients is not None:
+        return sorted({item.strip().lower() for item in configured_recipients if item.strip()})
+    if user is not None:
+        return [user.email.lower()] if _account_is_eligible(user, incident, event_key) else []
+    accounts = db.scalars(select(User).where(User.email.is_not(None))).all()
+    recipients = [user.email.lower() for user in accounts if _account_is_eligible(user, incident, event_key)]
+    # Preserve the existing server-side recipient integration for deployments
+    # that have not yet provisioned an account preference. It is never derived
+    # from a client request and remains useful for Alertmanager delivery.
+    if not accounts and settings is not None:
+        recipients = settings.get_incident_notification_emails()
+    return sorted(set(recipients))
 
 
 async def send_test_email(settings: Settings, recipient: str) -> str:
@@ -42,8 +76,9 @@ async def notify_incident(
     event_key: str,
     settings: Settings,
     recipients: list[str] | None = None,
+    user: User | None = None,
 ) -> list[dict]:
-    recipients = recipients if recipients is not None else settings.get_incident_notification_emails()
+    recipients = notification_recipients(db, incident, event_key, user, recipients, settings)
     if not recipients:
         return []
     sent: list[dict] = []
@@ -54,8 +89,6 @@ async def notify_incident(
             reply_to=settings.email_reply_to,
         ) if settings.resend_api_key else None
     )
-    if service is None:
-        return [{"recipient": recipient, "status": "not_configured"} for recipient in recipients]
     for recipient in sorted({item.strip().lower() for item in recipients if item.strip()}):
         existing = db.scalar(select(EmailNotification).where(
             EmailNotification.incident_id == incident.id,
@@ -72,22 +105,39 @@ async def notify_incident(
         simulated = incident.source == "simulation"
         subject = f"{'[SIMULATED] ' if simulated else ''}{incident.severity}: {incident.title}"
         link = f"{settings.public_app_url.rstrip('/')}/incidents/{incident.id}"
+        evidence = db.scalar(
+            select(EvidenceRecord)
+            .where(EvidenceRecord.incident_id == incident.id)
+            .order_by(desc(EvidenceRecord.collected_at))
+        )
+        observed = "No metric value was recorded."
+        if evidence and evidence.metric_name:
+            observed = f"{evidence.metric_name}={evidence.metric_value} {evidence.unit or ''}".strip()
+        diagnostic_context = incident.description
+        if simulated:
+            diagnostic_context = f"SIMULATED demonstration only. {diagnostic_context}"
+        simulated_prefix = "SIMULATED DEMONSTRATION\n" if simulated else ""
         text = (
+            f"{simulated_prefix}"
             f"KiboLens incident {incident.incident_number}\n"
             f"Severity: {incident.severity}\nResource: {incident.affected_service or incident.affected_host or 'unknown'}\n"
+            f"Observed: {observed}\n"
             f"Status: {incident.status}\nDetected: {incident.first_detected_at.isoformat()}\n\n"
-            f"{incident.description}\n\nOpen incident: {link}\nInvestigate with AI from the incident page."
+            f"{diagnostic_context}\n\nOpen incident: {link}\nInvestigate with AI from the incident page."
         )
         html = "<html><body>" + "".join(
             f"<p><strong>{escape(label)}</strong> {escape(str(value))}</p>" for label, value in (
                 ("Incident", incident.incident_number), ("Severity", incident.severity),
                 ("Resource", incident.affected_service or incident.affected_host or "unknown"),
+                ("Observed", observed),
                 ("Status", incident.status), ("Detected", incident.first_detected_at.isoformat()),
             )
-        ) + f"<p>{escape(incident.description)}</p><p><a href='{escape(link, quote=True)}'>Open incident and investigate with AI</a></p></body></html>"
+        ) + f"<p><strong>{'SIMULATED DEMONSTRATION: ' if simulated else ''}</strong>{escape(diagnostic_context)}</p><p><a href='{escape(link, quote=True)}'>Open incident and investigate with AI</a></p></body></html>"
         try:
             delivery.attempts += 1
             delivery.last_attempt_at = datetime.now(UTC)
+            if service is None:
+                raise RuntimeError("Resend email delivery is not configured.")
             provider_id = await asyncio.to_thread(service.send_incident_email, recipient, subject, text, html)
             delivery.status = "sent"
             delivery.provider_id = provider_id
@@ -96,8 +146,8 @@ async def notify_incident(
             sent.append({"recipient": recipient, "status": "sent"})
         except Exception as exc:
             delivery.status = "failed"
-            delivery.error = type(exc).__name__
-            sent.append({"recipient": recipient, "status": "failed"})
+            delivery.error = str(exc)[:500]
+            sent.append({"recipient": recipient, "status": "failed", "error": delivery.error})
         db.flush()
     return sent
 

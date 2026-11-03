@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from app.api.dependencies import CsrfSession, CurrentUser, DatabaseSession, require_session
 from app.core.config import get_settings
 from app.core.throttle import LoginThrottle
@@ -37,6 +39,7 @@ from sqlalchemy import select
 import logging
 
 logger = logging.getLogger(__name__)
+UTC = timezone.utc
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 throttle = LoginThrottle(get_settings().login_max_attempts)
@@ -218,6 +221,8 @@ def verify_otp_endpoint(
     settings = get_settings()
     try:
         verify_otp(database, str(user.id), payload.otp, settings)
+        user.email_verified_at = datetime.now(UTC)
+        database.flush()
         
         # OTP verified - clear throttle and create session
         throttle.clear(throttle_key)

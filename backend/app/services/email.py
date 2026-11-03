@@ -120,6 +120,8 @@ KiboLens Incident Management System
 
     def _send_email(self, to_email: str, subject: str, text_body: str, html_body: str) -> str:
         # Send via Resend API
+        email_parts = to_email.split("@")
+        masked_email = f"{email_parts[0][:2]}***@{email_parts[1]}" if len(email_parts) == 2 else "***"
         try:
             with httpx.Client(timeout=10.0) as client:
                 response = client.post(

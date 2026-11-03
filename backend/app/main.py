@@ -107,7 +107,8 @@ async def _observe_container_events(settings) -> None:
                             },
                         )
                         await service.collect_incident_evidence(incident)
-                        await notify_incident(db, incident, "firing", settings)
+                        if not is_lab or labels.get("kibolens.lab.notify_account") == "true":
+                            await notify_incident(db, incident, "firing", settings)
                         db.commit()
                     elif recovery:
                         existing = db.scalar(select(Incident).where(
@@ -122,7 +123,8 @@ async def _observe_container_events(settings) -> None:
                                 annotations={"summary": f"Docker container {event.get('name') or event_id} recovered"},
                             )
                             resolved = service.process_alert(alert)
-                            await notify_incident(db, resolved, "resolved", settings)
+                            if not is_lab or labels.get("kibolens.lab.notify_account") == "true":
+                                await notify_incident(db, resolved, "resolved", settings)
                             db.commit()
                 finally:
                     db.close()

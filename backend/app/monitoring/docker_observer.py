@@ -208,7 +208,7 @@ class DockerLabController(DockerObserver):
         "missing-dependency", "config-error", "interview-demo",
     })
 
-    def _start_sync(self, scenario: str, healthy: bool = False) -> dict:
+    def _start_sync(self, scenario: str, healthy: bool = False, notify_account: bool | None = False) -> dict:
         if scenario not in self.SCENARIOS:
             raise ValueError("Unsupported Failure Lab scenario.")
         client = self._client()
@@ -220,6 +220,9 @@ class DockerLabController(DockerObserver):
             for container in existing:
                 if container.status == "running" and not healthy:
                     return {"name": name, "status": "running"}
+                if notify_account is None:
+                    existing_labels = container.attrs.get("Config", {}).get("Labels", {})
+                    notify_account = existing_labels.get("kibolens.lab.notify_account") == "true"
                 container.remove(force=True)
             try:
                 network = client.networks.get("kibolens-lab")
@@ -242,7 +245,11 @@ class DockerLabController(DockerObserver):
                 mem_limit="64m",
                 nano_cpus=500_000_000,
                 pids_limit=20,
-                labels={"kibolens.lab": "true", "kibolens.lab.scenario": scenario},
+                labels={
+                    "kibolens.lab": "true",
+                    "kibolens.lab.scenario": scenario,
+                    "kibolens.lab.notify_account": "true" if notify_account else "false",
+                },
                 network=network.name,
                 restart_policy={"Name": "no"},
                 environment=environment,
@@ -251,8 +258,8 @@ class DockerLabController(DockerObserver):
         finally:
             client.close()
 
-    async def start(self, scenario: str, healthy: bool = False) -> dict:
-        return await asyncio.to_thread(self._start_sync, scenario, healthy)
+    async def start(self, scenario: str, healthy: bool = False, notify_account: bool | None = False) -> dict:
+        return await asyncio.to_thread(self._start_sync, scenario, healthy, notify_account)
 
     def _stop_sync(self, scenario: str) -> bool:
         if scenario not in self.SCENARIOS:

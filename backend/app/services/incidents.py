@@ -23,6 +23,7 @@ from app.schemas.monitoring import AlertmanagerAlert
 from app.monitoring.alert_fingerprint import logical_alert_fingerprint
 
 logger = logging.getLogger(__name__)
+SEVERITY_RANK = {"INFO": 0, "WARNING": 1, "HIGH": 2, "CRITICAL": 3}
 
 # Valid state transitions
 VALID_TRANSITIONS: dict[IncidentStatus, list[IncidentStatus]] = {
@@ -45,6 +46,7 @@ class IncidentService:
     def __init__(self, db: Session, monitoring_service: MonitoringService | None = None):
         self.db = db
         self.monitoring_service = monitoring_service
+        self.last_notification_event_key = "firing"
 
     def _generate_incident_number(self) -> str:
         """
@@ -396,6 +398,7 @@ class IncidentService:
         Handles both firing and resolved alerts idempotently.
         """
         fingerprint = alert.fingerprint
+        self.last_notification_event_key = "resolved" if alert.status == "resolved" else "firing"
         now = datetime.now(UTC)
         if alert.labels.get("kibolens_simulated") == "true":
             alert_source = "simulation"
@@ -458,6 +461,8 @@ class IncidentService:
                         source=alert_source,
                         metadata={"previous_severity": old_severity, "new_severity": severity},
                     )
+                    if SEVERITY_RANK.get(severity, 0) > SEVERITY_RANK.get(old_severity, 0):
+                        self.last_notification_event_key = f"severity-{severity.lower()}"
 
                 self.record_incident_event(
                     incident_id=existing.id,

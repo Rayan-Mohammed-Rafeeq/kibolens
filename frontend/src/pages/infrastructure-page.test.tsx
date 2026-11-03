@@ -57,12 +57,12 @@ describe("InfrastructurePage - VM Empty State", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("No virtual machines detected")).toBeTruthy();
+      expect(screen.getByText("No virtual machines detected.")).toBeTruthy();
     });
 
     expect(
       screen.getByText(
-        /No libvirt-managed virtual machines are currently configured on this host.*Configure libvirt/i
+      "No virtual machines are currently registered for monitoring on this host."
       )
     ).toBeTruthy();
   });
@@ -83,17 +83,16 @@ describe("InfrastructurePage - VM Empty State", () => {
     );
 
     await waitFor(() => {
-      const heading = screen.getAllByText("No virtual machines detected")[0];
+      const heading = screen.getAllByText("No virtual machines detected.")[0];
       expect(heading).toBeTruthy();
     });
 
     // Should NOT show "Configure libvirt" message for available state
     await waitFor(() => {
       const text = screen.getByText(
-        "No libvirt-managed virtual machines are currently configured on this host."
+        "No virtual machines are currently registered for monitoring on this host."
       );
       expect(text).toBeTruthy();
-      // Verify the full text doesn't include "Configure libvirt"
       expect(text.textContent).not.toContain("Configure libvirt");
     });
   });
@@ -204,7 +203,7 @@ describe("InfrastructurePage - VM Empty State", () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          /VM inventory is unavailable because the host libvirt connection could not be queried/i
+          /VM inventory could not be queried/i
         )
       ).toBeTruthy();
     });

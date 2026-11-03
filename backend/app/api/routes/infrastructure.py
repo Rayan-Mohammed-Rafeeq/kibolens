@@ -23,7 +23,7 @@ from app.schemas.monitoring import (
     VMInventoryResponse,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.services.notifications import notify_incident
 from app.models.incident import Incident
@@ -39,7 +39,7 @@ def monitoring_service() -> MonitoringService:
         PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
         settings,
         DockerObserver(settings.docker_socket_path) if settings.docker_observer_enabled else None,
-        VMObserver(settings.libvirt_uri) if settings.vm_observer_enabled else None,
+        VMObserver(settings.libvirt_uri, settings.libvirt_socket_path) if settings.vm_observer_enabled else None,
     )
 
 
@@ -133,15 +133,9 @@ async def alertmanager_webhook(
         if alert.fingerprint not in request_fingerprints:
             request_fingerprints.add(alert.fingerprint)
             try:
-                before = db.scalar(select(Incident).where(
-                    and_(Incident.alert_fingerprint == alert.fingerprint, Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]))
-                ))
-                before_severity = before.severity if before else None
                 incident = incident_service.process_alert(alert)
                 await incident_service.collect_incident_evidence(incident)
-                event_key = "resolved" if alert.status == "resolved" else (
-                    f"severity-{incident.severity.lower()}" if before_severity and before_severity != incident.severity else "firing"
-                )
+                event_key = incident_service.last_notification_event_key
                 await notify_incident(db, incident, event_key, settings)
                 processed += 1
             except Exception as e:

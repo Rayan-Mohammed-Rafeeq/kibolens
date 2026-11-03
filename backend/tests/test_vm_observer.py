@@ -15,7 +15,7 @@ def test_libvirt_binding_is_importable_when_installed() -> None:
 async def test_vm_observer_handles_missing_python_binding(monkeypatch) -> None:
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: None))
 
-    observer = VMObserver()
+    observer = VMObserver(socket_path="")
 
     assert await observer.list_vms() == []
     assert observer.last_error is not None
@@ -33,7 +33,7 @@ async def test_vm_observer_handles_unavailable_socket(monkeypatch) -> None:
 
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
 
-    observer = VMObserver()
+    observer = VMObserver(socket_path="/definitely/missing/libvirt-sock-ro")
 
     assert await observer.list_vms() == []
     assert observer.last_error is None
@@ -50,7 +50,7 @@ async def test_vm_observer_handles_unavailable_daemon(monkeypatch) -> None:
 
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
 
-    observer = VMObserver()
+    observer = VMObserver(socket_path="")
 
     assert await observer.list_vms() == []
     assert observer.last_error is not None
@@ -67,7 +67,7 @@ async def test_vm_observer_handles_permission_error(monkeypatch) -> None:
 
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
 
-    observer = VMObserver()
+    observer = VMObserver(socket_path="")
 
     assert await observer.list_vms() == []
     assert observer.last_error is not None
@@ -92,7 +92,7 @@ async def test_vm_observer_reports_available_empty_inventory(monkeypatch) -> Non
 
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
 
-    observer = VMObserver()
+    observer = VMObserver(socket_path="")
 
     assert await observer.list_vms() == []
     assert observer.last_error is None
@@ -148,7 +148,7 @@ async def test_vm_observer_discovers_domains_from_test_connection(monkeypatch) -
 
     monkeypatch.setattr(VMObserver, "_libvirt", staticmethod(lambda: FakeLibvirt))
 
-    observer = VMObserver("qemu:///system")
+    observer = VMObserver("qemu:///system", socket_path="")
     result = await observer.list_vms()
 
     assert len(result) == 1
