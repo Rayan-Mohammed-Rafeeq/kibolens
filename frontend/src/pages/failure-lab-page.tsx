@@ -24,7 +24,7 @@ export function FailureLabPage() {
     <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-200">
       <ShieldCheck size={17} />
       <span>Administrator-only and CSRF-protected.</span>
-      <label className="flex items-center gap-2"><input type="checkbox" checked={notifyDemo} onChange={(event) => setNotifyDemo(event.target.checked)} />Send demo email to my account email</label>
+      <label className="flex items-center gap-2"><input type="checkbox" checked={notifyDemo} onChange={(event) => setNotifyDemo(event.target.checked)} />Notify both configured server owners by email</label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={physical} onChange={(event) => setPhysical(event.target.checked)} />Use isolated Docker lab where supported</label>
     </div>
     {lastResult && <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3 text-sm text-cyan-100">{lastResult.name}: incident {lastResult.incident_id ? "created" : "not created"}; email {lastResult.notification?.status ?? "not requested"}{lastResult.notification?.detail ? ` — ${lastResult.notification.detail}` : ""}.</div>}

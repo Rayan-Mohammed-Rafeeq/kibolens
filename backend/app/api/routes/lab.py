@@ -126,11 +126,15 @@ async def start_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, request
         settings = get_settings()
         notification = {"requested": request.notify_account, "status": "not_requested"}
         if request.notify_account:
-            results = await notify_incident(db, incident, "firing", settings, user=user)
+            # Use configured server-owner recipients for both simulated and real incidents
+            configured_recipients = settings.get_incident_notification_emails()
+            results = await notify_incident(db, incident, "firing", settings, recipients=configured_recipients)
             notification = {
                 "requested": True,
+                "recipients": configured_recipients,
                 "status": results[0]["status"] if results else "not_configured",
-                "detail": results[0].get("error") if results else "Verify the account email and notification delivery configuration.",
+                "detail": results[0].get("error") if results else "Verify notification delivery configuration.",
+                "delivery_results": results,
             }
         db.commit()
         return {"name": synthetic.key, "status": "SIMULATED", "simulated": True, "incident_id": str(incident.id), "notification": notification}
@@ -154,7 +158,9 @@ async def stop_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, db: Sess
         incident = db.scalar(select(Incident).where(Incident.alert_fingerprint == f"simulation:{scenario}", Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"])))
         if incident:
             resolved = service.process_alert(make_alert(synthetic, status="resolved"))
-            await notify_incident(db, resolved, "resolved", get_settings(), user=user)
+            # Use configured server-owner recipients for resolved notifications
+            configured_recipients = get_settings().get_incident_notification_emails()
+            await notify_incident(db, resolved, "resolved", get_settings(), recipients=configured_recipients)
             db.commit()
         return {"stopped": bool(incident), "simulated": True}
     physical_map = {"container-crash": "crasher", "container-restart-loop": "restart-loop", "container-unhealthy": "unhealthy", "application-config-failure": "config-error"}

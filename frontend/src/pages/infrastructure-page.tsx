@@ -6,13 +6,12 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { MarkdownRenderer } from "../components/markdown-renderer";
 import { incidentsService } from "../services/incidents";
 import { monitoringService } from "../services/monitoring";
-import type { ContainerStatus, MetricHistory, VirtualMachineStatus } from "../types/monitoring";
+import type { ContainerStatus, MetricHistory } from "../types/monitoring";
 
 export function InfrastructurePage() {
   const cpu = useQuery({ queryKey: ["metric-history", "cpu"], queryFn: () => monitoringService.history("cpu_utilization"), refetchInterval: 60_000 });
   const memory = useQuery({ queryKey: ["metric-history", "memory"], queryFn: () => monitoringService.history("memory_utilization"), refetchInterval: 60_000 });
   const containers = useQuery({ queryKey: ["containers"], queryFn: monitoringService.containers, refetchInterval: 30_000 });
-  const vms = useQuery({ queryKey: ["vms"], queryFn: monitoringService.vmInventory, refetchInterval: 30_000 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = containers.data?.find((container) => container.id === selectedId);
 
@@ -41,7 +40,10 @@ export function InfrastructurePage() {
 
     <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Virtual machines</h2></header>
-      {vms.isLoading ? <p className="p-5 text-sm text-zinc-500">Checking VM inventory…</p> : vms.isError ? <p className="p-5 text-sm text-zinc-400">VM inventory could not be queried. Check the backend connection and libvirt configuration.</p> : vms.data?.availability === "unavailable" ? <p className="p-5 text-sm text-zinc-400">{vms.data.detail ?? "VM inventory could not be queried. Check the libvirt daemon and socket permissions."}</p> : vms.data?.items.length ? <div className="divide-y divide-zinc-800">{vms.data.items.map((vm) => <VMRow key={vm.id} vm={vm} />)}</div> : <div className="p-5"><p className="text-sm font-medium text-zinc-300">No virtual machines detected.</p><p className="mt-1 text-sm text-zinc-500">No virtual machines are currently registered for monitoring on this host.</p></div>}
+      <div className="p-5">
+        <p className="text-sm font-medium text-zinc-300">Virtual machine monitoring is not currently enabled</p>
+        <p className="mt-1 text-sm text-zinc-500">VM monitoring is planned for a future release. Your Docker containers and host infrastructure continue to be monitored normally.</p>
+      </div>
     </section>
   </section>;
 }
@@ -73,7 +75,6 @@ function ContainerDetails({ container, incidents, incidentsLoading }: { containe
   return <section className="mt-4 rounded-xl border border-cyan-400/20 bg-zinc-900/40 p-5"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-wide text-cyan-300">Container details</p><h2 className="mt-1 text-lg font-semibold">{container.name}</h2></div><span className="font-mono text-xs text-zinc-500">{container.id ?? "ID unavailable"}</span></div><div className="mt-4 grid gap-3 text-sm text-zinc-300 sm:grid-cols-2 lg:grid-cols-4"><Detail label="Docker state" value={container.docker_state} /><Detail label="Health" value={container.health === "NO_CHECK" ? "No Docker healthcheck" : container.health} /><Detail label="CPU" value={display(container.cpu_percent, "%")} /><Detail label="Memory" value={displayBytes(container.memory_bytes)} /><Detail label="Network RX" value={`${displayBytes(container.network_receive_bytes_per_second)}/s`} /><Detail label="Network TX" value={`${displayBytes(container.network_transmit_bytes_per_second)}/s`} /><Detail label="Restarts" value={`${container.restart_count ?? "—"}`} /><Detail label="Uptime" value={formatUptime(container.uptime_seconds)} /></div><div className="mt-5 grid gap-5 lg:grid-cols-2"><div><h3 className="font-medium text-zinc-200">Docker logs</h3>{container.logs ? <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">{container.logs}</pre> : <p className="mt-2 text-sm text-zinc-500">No Docker logs are available.</p>}</div><div><h3 className="font-medium text-zinc-200">Related incidents</h3>{incidentsLoading ? <p className="mt-2 text-sm text-zinc-500">Loading incidents…</p> : incidents.length ? <ul className="mt-2 space-y-2">{incidents.map((incident) => <li key={incident.id}><Link className="text-sm text-cyan-300 hover:text-cyan-200" to={`/incidents/${incident.id}`}>{incident.incident_number} · {incident.title} · {incident.status}</Link></li>)}</ul> : <p className="mt-2 text-sm text-zinc-500">No incidents are associated with this service.</p>}</div></div><div className="mt-5"><h3 className="font-medium text-zinc-200">Telemetry evidence</h3><p className="mt-2 text-sm text-zinc-400">Telemetry status: <span className="text-zinc-200">{container.availability}</span>. Values marked — were not reported by Docker or cAdvisor.</p>{container.error && <MarkdownRenderer content={`**Docker error:** ${container.error}`} />}</div></section>;
 }
 
-function VMRow({ vm }: { vm: VirtualMachineStatus }) { return <div className="flex items-center justify-between gap-4 p-5"><div><p className="font-medium">{vm.name}</p><p className="mt-1 text-sm text-zinc-500">{vm.vcpu_count ?? "?"} vCPU · memory {displayBytes(vm.memory_used_bytes)} / {displayBytes(vm.memory_allocated_bytes)} · {vm.ip_addresses.length ? vm.ip_addresses.join(", ") : "no guest IP reported"}</p><p className="mt-1 text-xs text-zinc-600">{vm.operating_system ?? "OS not reported"} · guest agent {vm.guest_agent_configured ? "configured" : "not detected"}</p></div><Badge label={vm.status} tone={vm.status === "RUNNING" ? "green" : "amber"} /></div>; }
 function Detail({ label, value }: { label: string; value: string }) { return <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"><p className="text-xs text-zinc-500">{label}</p><p className="mt-1">{value}</p></div>; }
 function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red" }) { const colors = { green: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300", amber: "border-amber-400/25 bg-amber-400/10 text-amber-200", red: "border-red-400/25 bg-red-400/10 text-red-300" }; return <span className={`rounded-full border px-2.5 py-1 ${colors[tone]}`}>{label}</span>; }
 function display(value: number | null, suffix = ""): string { return value === null ? "—" : `${value.toFixed(1)}${suffix}`; }
