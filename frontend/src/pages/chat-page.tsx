@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { conversationService } from "../services/conversations";
 import type { Conversation } from "../types/conversations";
 import { MarkdownRenderer } from "../components/markdown-renderer";
+import { ConfirmDialog } from "../components/dialog";
 
 export function ChatPage() {
   const queryClient = useQueryClient();
@@ -13,6 +14,7 @@ export function ChatPage() {
   const [draft, setDraft] = useState("");
   const [investigationError, setInvestigationError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: conversationService.list });
   const messages = useQuery({
@@ -108,7 +110,7 @@ export function ChatPage() {
   return <section className="mx-auto grid h-[calc(100vh-5rem)] max-w-6xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/30 md:grid-cols-[17rem_1fr]">
     <aside className="border-b border-zinc-800 p-3 md:border-b-0 md:border-r">
       <button className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-400 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-60" onClick={() => create.mutate()} disabled={create.isPending}><Plus size={16} />{create.isPending ? "Creating…" : "New conversation"}</button>
-      <div className="mt-3 space-y-1">{conversations.data?.items.map((conversation) => <ConversationItem conversation={conversation} active={conversation.id === selectedId} key={conversation.id} onDelete={() => remove.mutate(conversation.id)} onSelect={() => selectConversation(conversation.id)} />)}{!conversations.data?.items.length && !conversations.isLoading && <p className="p-3 text-sm text-zinc-500">No conversations yet. Send a message to start one.</p>}</div>
+       <div className="mt-3 space-y-1">{conversations.data?.items.map((conversation) => <ConversationItem conversation={conversation} active={conversation.id === selectedId} key={conversation.id} onDelete={() => setPendingDelete(conversation)} onSelect={() => selectConversation(conversation.id)} />)}{!conversations.data?.items.length && !conversations.isLoading && <p className="p-3 text-sm text-zinc-500">No conversations yet. Send a message to start one.</p>}</div>
     </aside>
     <div className="flex min-h-0 min-w-0 flex-col">
       <header className="border-b border-zinc-800 px-6 py-4"><h1 className="font-semibold">AI Chat</h1><p className="mt-1 text-sm text-zinc-500">Evidence-based investigations using the LangGraph workflow, Prometheus, Docker and Qdrant.</p></header>
@@ -118,7 +120,8 @@ export function ChatPage() {
       </div>
       <form className="border-t border-zinc-800 p-4" onSubmit={(event) => void submit(event)}><div className="flex items-end gap-3"><textarea ref={composer} aria-label="Investigation question" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="Ask why a service failed, how CPU changed, or what this incident means…" rows={2} disabled={investigate.isPending || creating} className="min-h-12 flex-1 resize-none rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-cyan-400 disabled:opacity-60" /><button aria-label="Send investigation" className="rounded-md bg-cyan-400 p-3 text-zinc-950 disabled:opacity-50" disabled={!draft.trim() || investigate.isPending || creating}><Send size={17} /></button></div><p className="mt-2 text-xs text-zinc-600">Enter to send · Shift+Enter for a new line · messages are retained in the selected conversation.</p></form>
     </div>
-  </section>;
+     <ConfirmDialog open={Boolean(pendingDelete)} title="Delete conversation?" description={`“${pendingDelete?.title ?? "This conversation"}” and its investigation messages will be permanently removed.`} confirmLabel="Delete" destructive busy={remove.isPending} onCancel={() => setPendingDelete(null)} onConfirm={() => { if (pendingDelete) remove.mutate(pendingDelete.id, { onSuccess: () => setPendingDelete(null) }); }} />
+   </section>;
 }
 
 function ConversationItem({ conversation, active, onDelete, onSelect }: { conversation: Conversation; active: boolean; onDelete: () => void; onSelect: () => void }) { return <div className={`group flex items-center rounded-md ${active ? "bg-zinc-800" : "hover:bg-zinc-900"}`}><button className="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm text-zinc-300" onClick={onSelect}>{conversation.title}</button><button aria-label={`Delete ${conversation.title}`} className="p-2 text-zinc-500 opacity-0 group-hover:opacity-100 hover:text-red-300" onClick={onDelete}><Trash2 size={14} /></button><MoreHorizontal className="hidden" /></div>; }

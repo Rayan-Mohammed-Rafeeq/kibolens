@@ -12,8 +12,9 @@ networks:
       kibolens.lab.description: "Isolated failure lab network - no external or production access"
 
 services:
-  # Dedicated interview workflow: fails once with a real exit code and can be
-  # recreated healthy through the administrator Recovery action.
+  # Legacy interview workflow. It is no longer exposed by KiboLens Failure Lab;
+  # retain this definition so existing images/containers are not removed by a
+  # product UI change. It can be deleted in a separately planned cleanup.
   interview-demo:
     build:
       context: ./scenarios

@@ -9,21 +9,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 
+class DockerObserverError(RuntimeError):
+    """Docker inventory could not be read."""
+
+
 class DockerObserver:
     def __init__(self, socket_path: str = "/var/run/docker.sock") -> None:
         self.socket_path = socket_path
+        self._cache: list[dict] | None = None
+        self._cache_at = 0.0
+        self._refresh_lock = asyncio.Lock()
 
     def _client(self):
         try:
             import docker
         except ImportError:
             return None
-        return docker.DockerClient(base_url=f"unix://{self.socket_path}")
+        return docker.DockerClient(base_url=f"unix://{self.socket_path}", timeout=5)
 
     @staticmethod
     def _direct_stats(container) -> dict:
@@ -51,75 +59,143 @@ class DockerObserver:
             logger.debug("Could not collect direct Docker stats: %s", exc)
             return {}
 
-    def _list_sync(self) -> list[dict]:
+    def _list_basic_sync(self) -> list[dict]:
         client = self._client()
         if client is None:
-            return []
+            raise DockerObserverError("Docker SDK is unavailable.")
         try:
-            containers = client.containers.list(all=True)
+            # /containers/json returns the complete basic inventory in one
+            # request. Expensive inspect/stats/log calls happen below with a
+            # bounded worker pool and never block the names list itself.
+            containers = client.api.containers(all=True)
             output = []
             for container in containers:
-                attrs = container.attrs or {}
-                state = attrs.get("State", {})
-                health = state.get("Health", {}).get("Status")
+                container_id = container.get("Id")
+                if not container_id:
+                    continue
+                labels = container.get("Labels") or {}
+                raw_state = container.get("State") or "unknown"
+                docker_state = {"running": "RUNNING", "restarting": "RESTARTING"}.get(raw_state, "STOPPED")
                 docker_state = (
-                    "RESTARTING" if state.get("Restarting") else
-                    "RUNNING" if state.get("Running") else "STOPPED"
+                    "RESTARTING" if raw_state == "restarting" else docker_state
                 )
-                health_status = {
-                    "healthy": "HEALTHY",
-                    "unhealthy": "UNHEALTHY",
-                    "starting": "STARTING",
-                }.get(health, "NO_CHECK" if health is None else "UNKNOWN")
-                status = "UNHEALTHY" if health_status == "UNHEALTHY" else docker_state
-                observed = state.get("StartedAt") or state.get("FinishedAt")
-                try:
-                    observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00")) if observed else None
-                except (AttributeError, ValueError):
-                    observed_at = None
-                uptime_seconds = None
-                if state.get("Running") and state.get("StartedAt"):
-                    try:
-                        started_at = datetime.fromisoformat(state["StartedAt"].replace("Z", "+00:00"))
-                        uptime_seconds = max(0.0, (datetime.now(timezone.utc) - started_at).total_seconds())
-                    except (AttributeError, ValueError):
-                        pass
                 output.append({
-                    "id": container.id,
-                    "name": container.name,
-                    "status": status,
+                    "id": container_id,
+                    "name": (container.get("Names") or [container_id[:12]])[0].lstrip("/"),
+                    "status": docker_state,
                     "docker_state": docker_state,
-                    "health": health_status,
-                    "restart_count": int(attrs.get("RestartCount", 0)),
-                    "image": (attrs.get("Config", {}).get("Image") or ""),
-                    "labels": {k: v for k, v in (attrs.get("Config", {}).get("Labels") or {}).items() if k.startswith("kibolens.") or k.startswith("com.docker.compose.")},
-                    "compose_service": (attrs.get("Config", {}).get("Labels") or {}).get("com.docker.compose.service"),
-                    "memory_limit_bytes": (attrs.get("HostConfig", {}).get("Memory") or None),
-                    "uptime_seconds": uptime_seconds,
-                    "exit_code": state.get("ExitCode"),
-                    "error": state.get("Error") or None,
-                    "last_observation": observed_at,
-                    "logs": self._logs_sync(container),
-                    **self._direct_stats(container),
+                    "health": "UNKNOWN",
+                    "restart_count": None,
+                    "image": container.get("Image") or "",
+                    "labels": {k: v for k, v in labels.items() if k.startswith("kibolens.") or k.startswith("com.docker.compose.")},
+                    "compose_service": labels.get("com.docker.compose.service"),
+                    "memory_limit_bytes": None,
+                    "uptime_seconds": None,
+                    "exit_code": None,
+                    "error": None,
+                    "last_observation": None,
                 })
             return output
+        finally:
+            client.close()
+
+    def _enrich_sync(self, container_id: str) -> dict:
+        client = self._client()
+        if client is None:
+            return {}
+        try:
+            container = client.containers.get(container_id)
+            attrs = container.attrs or {}
+            state = attrs.get("State", {})
+            health = state.get("Health", {}).get("Status")
+            health_status = {"healthy": "HEALTHY", "unhealthy": "UNHEALTHY", "starting": "STARTING"}.get(health, "NO_CHECK" if health is None else "UNKNOWN")
+            observed = state.get("StartedAt") or state.get("FinishedAt")
+            observed_at = None
+            if observed:
+                try:
+                    observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+            uptime_seconds = None
+            if state.get("Running") and state.get("StartedAt"):
+                try:
+                    started_at = datetime.fromisoformat(state["StartedAt"].replace("Z", "+00:00"))
+                    uptime_seconds = max(0.0, (datetime.now(timezone.utc) - started_at).total_seconds())
+                except ValueError:
+                    pass
+            return {
+                "status": "UNHEALTHY" if health_status == "UNHEALTHY" else ("RESTARTING" if state.get("Restarting") else "RUNNING" if state.get("Running") else "STOPPED"),
+                "docker_state": "RESTARTING" if state.get("Restarting") else "RUNNING" if state.get("Running") else "STOPPED",
+                "health": health_status,
+                "restart_count": int(attrs.get("RestartCount", 0)),
+                "memory_limit_bytes": attrs.get("HostConfig", {}).get("Memory") or None,
+                "uptime_seconds": uptime_seconds,
+                "exit_code": state.get("ExitCode"),
+                "error": state.get("Error") or None,
+                "last_observation": observed_at,
+                "logs": self._logs_sync(container),
+                **self._direct_stats(container),
+            }
+        except Exception as exc:
+            logger.debug("Could not enrich Docker container %s: %s", container_id[:12], exc)
+            return {}
         finally:
             client.close()
 
     @staticmethod
     def _logs_sync(container) -> str:
         try:
-            return container.logs(tail=100, timestamps=True).decode("utf-8", errors="replace")[-12000:]
+            return container.logs(tail=50, timestamps=True).decode("utf-8", errors="replace")[-6000:]
         except Exception as exc:
             logger.debug("Could not collect logs for container: %s", exc)
             return ""
 
-    async def list_containers(self) -> list[dict]:
+    async def list_containers(self, include_details: bool = False) -> list[dict]:
+        now = time.monotonic()
+        if self._cache is not None and now - self._cache_at < 5:
+            return [dict(item) for item in self._cache]
+        async with self._refresh_lock:
+            now = time.monotonic()
+            if self._cache is not None and now - self._cache_at < 5:
+                return [dict(item) for item in self._cache]
+            try:
+                basic = await asyncio.wait_for(asyncio.to_thread(self._list_basic_sync), timeout=5)
+                if not include_details:
+                    self._cache = basic
+                    self._cache_at = time.monotonic()
+                    return [dict(item) for item in basic]
+                semaphore = asyncio.Semaphore(6)
+
+                async def enrich(item: dict) -> dict:
+                    async with semaphore:
+                        try:
+                            return await asyncio.wait_for(asyncio.to_thread(self._enrich_sync, item["id"]), timeout=5)
+                        except TimeoutError:
+                            return {}
+
+                details = await asyncio.gather(*(enrich(item) for item in basic), return_exceptions=True)
+                output = [
+                    {**item, **(detail if isinstance(detail, dict) else {})}
+                    for item, detail in zip(basic, details, strict=True)
+                ]
+                self._cache = output
+                self._cache_at = time.monotonic()
+                return [dict(item) for item in output]
+            except Exception as exc:
+                logger.warning("Docker observer unavailable: %s", exc)
+                raise DockerObserverError("Docker inventory is unavailable.") from exc
+
+    async def container_details(self, container_id: str) -> dict:
+        """Fetch expensive telemetry for one expanded inventory row."""
+        if not container_id or len(container_id) > 128:
+            raise DockerObserverError("Invalid Docker container identifier.")
         try:
-            return await asyncio.to_thread(self._list_sync)
-        except Exception as exc:
-            logger.warning("Docker observer unavailable: %s", exc)
-            return []
+            details = await asyncio.wait_for(asyncio.to_thread(self._enrich_sync, container_id), timeout=5)
+        except TimeoutError as exc:
+            raise DockerObserverError("Docker container telemetry timed out.") from exc
+        if not details:
+            raise DockerObserverError("Docker container telemetry is unavailable.")
+        return details
 
     def _events_sync(self, since: float, until: float) -> list[dict]:
         client = self._client()
@@ -170,7 +246,7 @@ class DockerObserver:
 
     async def lab_containers(self) -> list[dict]:
         return [
-            container for container in await self.list_containers()
+            container for container in await self.list_containers(include_details=True)
             if container.get("labels", {}).get("kibolens.lab") == "true"
         ]
 
@@ -205,10 +281,10 @@ class DockerLabController(DockerObserver):
 
     SCENARIOS = frozenset({
         "crasher", "unhealthy", "restart-loop", "cpu-stress", "memory-pressure",
-        "missing-dependency", "config-error", "interview-demo",
+        "missing-dependency", "config-error",
     })
 
-    def _start_sync(self, scenario: str, healthy: bool = False) -> dict:
+    def _start_sync(self, scenario: str, healthy: bool = False, notify_account: bool | None = False) -> dict:
         if scenario not in self.SCENARIOS:
             raise ValueError("Unsupported Failure Lab scenario.")
         client = self._client()
@@ -220,6 +296,9 @@ class DockerLabController(DockerObserver):
             for container in existing:
                 if container.status == "running" and not healthy:
                     return {"name": name, "status": "running"}
+                if notify_account is None:
+                    existing_labels = container.attrs.get("Config", {}).get("Labels", {})
+                    notify_account = existing_labels.get("kibolens.lab.notify_account") == "true"
                 container.remove(force=True)
             try:
                 network = client.networks.get("kibolens-lab")
@@ -230,7 +309,6 @@ class DockerLabController(DockerObserver):
                     internal=True,
                     labels={"kibolens.lab": "true"},
                 )
-            environment = {"DEMO_MODE": "healthy" if healthy else "failing"} if scenario == "interview-demo" else None
             container = client.containers.run(
                 image=f"kibolens/lab-{scenario}:latest",
                 name=name,
@@ -242,17 +320,21 @@ class DockerLabController(DockerObserver):
                 mem_limit="64m",
                 nano_cpus=500_000_000,
                 pids_limit=20,
-                labels={"kibolens.lab": "true", "kibolens.lab.scenario": scenario},
+                labels={
+                    "kibolens.lab": "true",
+                    "kibolens.lab.scenario": scenario,
+                    "kibolens.lab.notify_account": "true" if notify_account else "false",
+                },
                 network=network.name,
                 restart_policy={"Name": "no"},
-                environment=environment,
+                environment=None,
             )
             return {"name": name, "id": container.id, "status": "healthy" if healthy else "created"}
         finally:
             client.close()
 
-    async def start(self, scenario: str, healthy: bool = False) -> dict:
-        return await asyncio.to_thread(self._start_sync, scenario, healthy)
+    async def start(self, scenario: str, healthy: bool = False, notify_account: bool | None = False) -> dict:
+        return await asyncio.to_thread(self._start_sync, scenario, healthy, notify_account)
 
     def _stop_sync(self, scenario: str) -> bool:
         if scenario not in self.SCENARIOS:

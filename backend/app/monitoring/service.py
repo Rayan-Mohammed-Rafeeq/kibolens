@@ -20,7 +20,7 @@ from app.schemas.monitoring import (
     MetricReading,
     VirtualMachineStatus,
 )
-from app.monitoring.docker_observer import DockerObserver
+from app.monitoring.docker_observer import DockerObserver, DockerObserverError
 from app.monitoring.vm_observer import VMObserver
 
 SUMMARY_QUERIES = {
@@ -144,18 +144,24 @@ class MonitoringService:
                 }
 
         docker_by_id: dict[str, dict] = {}
+        docker_error: str | None = None
         if self.docker_observer:
-            for item in await self.docker_observer.list_containers():
-                container_id = self._normalize_container_id(item.get("id"))
-                if not container_id:
-                    continue
-                docker_by_id[container_id] = item
-                containers_by_id.setdefault(container_id, {
-                    "id": container_id,
-                    "name": item.get("name") or container_id[:12],
-                    "observed_at": item.get("last_observation"),
-                })
+            try:
+                for item in await self.docker_observer.list_containers():
+                    container_id = self._normalize_container_id(item.get("id"))
+                    if not container_id:
+                        continue
+                    docker_by_id[container_id] = item
+                    containers_by_id.setdefault(container_id, {
+                        "id": container_id,
+                        "name": item.get("name") or container_id[:12],
+                        "observed_at": item.get("last_observation"),
+                    })
+            except DockerObserverError as exc:
+                docker_error = str(exc)
 
+        if docker_error and not containers_by_id:
+            raise DockerObserverError(docker_error)
         if not containers_by_id:
             return []
 
@@ -205,7 +211,7 @@ class MonitoringService:
                 block_read_bytes_per_second=measurements["block_read_bytes_per_second"].get(container_id),
                 block_write_bytes_per_second=measurements["block_write_bytes_per_second"].get(container_id),
                 uptime_seconds=docker_data.get("uptime_seconds"),
-                error=docker_data.get("error"),
+                 error=docker_data.get("error") or docker_error,
             ))
         return output
 
@@ -215,12 +221,20 @@ class MonitoringService:
 
     async def vm_inventory(self) -> tuple[list[VirtualMachineStatus], str, str | None]:
         if not self.vm_observer:
-            return [], "unavailable", "VM inventory is unavailable; VM presence cannot be determined."
+            return [], "unconfigured", None
         try:
             items = [VirtualMachineStatus.model_validate(item) for item in await self.vm_observer.list_vms()]
+            
+            # Check for unconfigured state (socket/integration absent).
+            if getattr(self.vm_observer, "availability", None) == "unconfigured" or getattr(self.vm_observer, "is_unconfigured", False):
+                return items, "unconfigured", None
+            
+            # Check for genuine errors (connection, permission, daemon failures)
             observer_error = getattr(self.vm_observer, "last_error", None)
             if observer_error:
                 return items, "unavailable", observer_error
+            
+            # Successful connection and query (including 0 VMs)
             return items, "available", None
         except Exception:
             return [], "unavailable", "VM monitoring is unavailable."

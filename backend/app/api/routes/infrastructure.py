@@ -9,7 +9,7 @@ from app.api.dependencies import CurrentUser, get_db
 from app.core.config import get_settings
 from app.monitoring.alerts import AlertDeduplicator
 from app.monitoring.prometheus import PrometheusClient
-from app.monitoring.docker_observer import DockerObserver
+from app.monitoring.docker_observer import DockerObserver, DockerObserverError
 from app.monitoring.service import MonitoringService
 from app.monitoring.vm_observer import VMObserver
 from app.schemas.monitoring import (
@@ -23,10 +23,8 @@ from app.schemas.monitoring import (
     VMInventoryResponse,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 from app.services.notifications import notify_incident
-from app.models.incident import Incident
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 alerts_router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -39,7 +37,7 @@ def monitoring_service() -> MonitoringService:
         PrometheusClient(settings.prometheus_url, settings.prometheus_timeout_seconds),
         settings,
         DockerObserver(settings.docker_socket_path) if settings.docker_observer_enabled else None,
-        VMObserver(settings.libvirt_uri) if settings.vm_observer_enabled else None,
+        VMObserver(settings.libvirt_uri, settings.libvirt_socket_path) if settings.vm_observer_enabled else None,
     )
 
 
@@ -67,6 +65,15 @@ async def infrastructure_history(
 @router.get("/containers", response_model=list[ContainerStatus])
 async def infrastructure_containers(_: CurrentUser) -> list[ContainerStatus]:
     return await monitoring_service().containers()
+
+
+@router.get("/containers/{container_id}/details")
+async def infrastructure_container_details(container_id: str, _: CurrentUser) -> dict:
+    observer = DockerObserver(get_settings().docker_socket_path)
+    try:
+        return {"id": container_id, **await observer.container_details(container_id)}
+    except DockerObserverError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.get("/vms", response_model=list[VirtualMachineStatus])
@@ -133,15 +140,9 @@ async def alertmanager_webhook(
         if alert.fingerprint not in request_fingerprints:
             request_fingerprints.add(alert.fingerprint)
             try:
-                before = db.scalar(select(Incident).where(
-                    and_(Incident.alert_fingerprint == alert.fingerprint, Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]))
-                ))
-                before_severity = before.severity if before else None
                 incident = incident_service.process_alert(alert)
                 await incident_service.collect_incident_evidence(incident)
-                event_key = "resolved" if alert.status == "resolved" else (
-                    f"severity-{incident.severity.lower()}" if before_severity and before_severity != incident.severity else "firing"
-                )
+                event_key = incident_service.last_notification_event_key
                 await notify_incident(db, incident, event_key, settings)
                 processed += 1
             except Exception as e:

@@ -85,7 +85,7 @@ async def _observe_container_events(settings) -> None:
                         incident = service.process_alert(alert)
                         container_details = next(
                             (
-                                item for item in await observer.list_containers()
+                                item for item in await observer.list_containers(include_details=True)
                                 if item.get("id", "").lstrip("/").removeprefix("docker/") == event_id
                             ),
                             {},
@@ -107,6 +107,9 @@ async def _observe_container_events(settings) -> None:
                             },
                         )
                         await service.collect_incident_evidence(incident)
+                        # Lab incidents use the same configured owner delivery
+                        # path as real incidents; delivery is never controlled
+                        # by a browser checkbox or the signed-in administrator.
                         await notify_incident(db, incident, "firing", settings)
                         db.commit()
                     elif recovery:

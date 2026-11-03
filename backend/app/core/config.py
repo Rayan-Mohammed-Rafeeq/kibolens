@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     docker_socket_path: str = "/var/run/docker.sock"
     vm_observer_enabled: bool = True
     libvirt_uri: str = "qemu:///system"
+    libvirt_socket_path: str = "/var/run/libvirt/libvirt-sock-ro"
 
     @field_validator("otp_max_attempts", mode="before")
     @classmethod

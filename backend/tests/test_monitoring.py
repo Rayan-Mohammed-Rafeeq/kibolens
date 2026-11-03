@@ -401,6 +401,7 @@ async def test_docker_inventory_is_merged_with_cadvisor_metrics() -> None:
 
 @pytest.mark.anyio
 async def test_unavailable_vm_observer_does_not_break_docker_inventory() -> None:
+    """Docker inventory should remain operational when VM integration encounters errors."""
     class FakeClient:
         async def instant_query(self, query: str):
             return []
@@ -427,6 +428,56 @@ async def test_unavailable_vm_observer_does_not_break_docker_inventory() -> None
     assert items == []
     assert availability == "unavailable"
     assert detail == "VM monitoring is unavailable."
+
+
+@pytest.mark.anyio
+async def test_unconfigured_vm_observer_returns_unconfigured_inventory() -> None:
+    """When VM integration is unconfigured (socket absent), return unconfigured state."""
+    class FakeClient:
+        async def instant_query(self, query: str):
+            return []
+
+    class UnconfiguredVMObserver:
+        last_error = None
+        is_unconfigured = True
+
+        async def list_vms(self):
+            return []
+
+    service = MonitoringService(
+        FakeClient(), Settings(), None, UnconfiguredVMObserver()
+    )
+
+    items, availability, detail = await service.vm_inventory()
+
+    assert items == []
+    assert availability == "unconfigured"
+    assert detail is None
+
+
+@pytest.mark.anyio
+async def test_available_vm_observer_with_zero_vms() -> None:
+    """When libvirt connects successfully with zero VMs, return available state."""
+    class FakeClient:
+        async def instant_query(self, query: str):
+            return []
+
+    class AvailableVMObserver:
+        last_error = None
+        is_unconfigured = False
+
+        async def list_vms(self):
+            return []
+
+    service = MonitoringService(
+        FakeClient(), Settings(), None, AvailableVMObserver()
+    )
+
+    items, availability, detail = await service.vm_inventory()
+
+    assert items == []
+    assert availability == "available"
+    assert detail is None
 
 
 @pytest.mark.anyio

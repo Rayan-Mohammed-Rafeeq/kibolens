@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, AlertTriangle, ArrowLeft, Clock, Info, Server } from "lucide-react";
+import { AlertCircle, ArrowLeft, Clock, Server } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { incidentsService } from "../services/incidents";
+import { SeverityBadge } from "../components/severity-badge";
 import type { IncidentSeverity, IncidentStatus } from "../types/incident";
-import { formatTimestamp, getSeverityColor, getStatusColor } from "../utils/incident";
+import { formatTimestamp, getStatusColor } from "../utils/incident";
 
 const VALID_TRANSITIONS: Record<IncidentStatus, IncidentStatus[]> = {
   DETECTED: ["INVESTIGATING", "RESOLVED"],
@@ -115,10 +116,7 @@ export function IncidentDetailPage() {
           <p className="mt-2 text-zinc-400">{incident.description}</p>
         </div>
         <div className="flex gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${getSeverityColor(incident.severity)}`}>
-            {incident.severity === "CRITICAL" ? <AlertCircle size={14} /> : incident.severity === "HIGH" || incident.severity === "WARNING" ? <AlertTriangle size={14} /> : <Info size={14} />}
-            {incident.severity}
-          </span>
+          <SeverityBadge severity={incident.severity} />
           <span className={`inline-block rounded-full px-3 py-1 text-sm font-medium ${getStatusColor(incident.status)}`}>
             {incident.status}
           </span>
@@ -312,6 +310,8 @@ export function IncidentDetailPage() {
                     </span>
                   </div>
                 )}
+                {item.evidence_metadata?.threshold !== undefined && <p className="mt-1 text-xs text-zinc-500">Threshold: {String(item.evidence_metadata.threshold)}{item.unit && !["boolean", "failed"].includes(item.unit) ? ` ${item.unit}` : ""}</p>}
+                {!item.metric_name && item.evidence_metadata && <p className="mt-2 text-sm text-zinc-300">{Object.entries(item.evidence_metadata).filter(([key]) => !["simulated", "labels"].includes(key)).map(([key, value]) => `${key.replaceAll("_", " ")}: ${typeof value === "string" ? value : JSON.stringify(value)}`).join(" · ")}</p>}
                 {item.resource_identifier && (
                   <p className="mt-1 text-xs text-zinc-500">Resource: {item.resource_identifier}</p>
                 )}

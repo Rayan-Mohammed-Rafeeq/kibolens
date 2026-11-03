@@ -1,7 +1,9 @@
-"""Administrator-only Failure Lab cleanup controls."""
+"""Administrator-only Failure Lab controls."""
+
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +11,8 @@ from app.api.dependencies import CsrfSession, CurrentUser
 from app.core.config import get_settings
 from app.monitoring.docker_observer import DockerLabController
 from app.api.dependencies import get_db
-from app.models.incident import Incident
+from app.models.incident import EvidenceRecord, Incident
+from app.models.notification import EmailNotification
 from app.services.incidents import IncidentService
 from app.services.notifications import notify_incident
 from app.monitoring.simulation import SCENARIO_BY_KEY, SIMULATION_SCENARIOS, make_alert
@@ -19,7 +22,8 @@ router = APIRouter(prefix="/infrastructure/lab", tags=["failure-lab"])
 
 class LabStartRequest(BaseModel):
     physical: bool = False
-    notify_test_recipients: bool = False
+    # Retained for old clients; configured owner delivery is now automatic.
+    notify_account: bool = False
     healthy: bool = False
 
 
@@ -30,6 +34,53 @@ class LabScenarioResponse(BaseModel):
     resource: str
     description: str
     safe_synthetic: bool = True
+
+
+def _delivery_summary(db: Session, incident: Incident | None) -> dict:
+    if incident is None:
+        return {"requested": False, "status": "not_started", "deliveries": []}
+    deliveries = db.scalars(
+        select(EmailNotification)
+        .where(EmailNotification.incident_id == incident.id)
+        .order_by(EmailNotification.created_at, EmailNotification.recipient)
+    ).all()
+    return {
+        "requested": bool(deliveries),
+        "status": (
+            "failed" if any(item.status == "failed" for item in deliveries)
+            else "pending" if any(item.status == "pending" for item in deliveries)
+            else "accepted" if deliveries else "not_requested"
+        ),
+        "deliveries": [
+            {
+                "recipient": item.recipient,
+                "status": item.status,
+                "provider_id": item.provider_id,
+                "detail": item.error,
+                "attempts": item.attempts,
+            }
+            for item in deliveries
+        ],
+    }
+
+
+def _evidence_summary(db: Session, incident: Incident) -> list[dict]:
+    records = db.scalars(
+        select(EvidenceRecord)
+        .where(EvidenceRecord.incident_id == incident.id)
+        .order_by(EvidenceRecord.collected_at)
+    ).all()
+    return [
+        {
+            "type": record.evidence_type,
+            "metric_name": record.metric_name,
+            "value": float(record.metric_value) if record.metric_value is not None else None,
+            "unit": record.unit,
+            "observed_at": record.observed_at.isoformat() if record.observed_at else None,
+            "metadata": record.evidence_metadata or {},
+        }
+        for record in records
+    ]
 
 
 @router.get("/scenarios", response_model=list[LabScenarioResponse])
@@ -48,17 +99,31 @@ async def lab_status(user: CurrentUser, db: Session = Depends(get_db)) -> list[d
     _admin(user)
     containers = await DockerLabController(get_settings().docker_socket_path).lab_containers()
     incidents = db.scalars(
-        select(Incident).where(Incident.source == "simulation", Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]))
+        select(Incident).where(Incident.source.in_(["simulation", "docker_lab"]), Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"]))
     ).all()
-    containers.extend({
-        "id": str(incident.id),
-        "name": incident.affected_service or incident.title,
-        "status": "SIMULATED",
-        "labels": {"kibolens.simulated": "true", "kibolens.scenario": (incident.alert_fingerprint or "").removeprefix("simulation:")},
-        "exit_code": None,
-        "logs": incident.description,
-        "incident_id": str(incident.id),
-    } for incident in incidents)
+    incident_by_scenario = {
+        (incident.alert_fingerprint or "").removeprefix("simulation:").removeprefix("docker:lab:"): incident
+        for incident in incidents
+    }
+    for container in containers:
+        scenario_key = container.get("labels", {}).get("kibolens.lab.scenario")
+        incident = incident_by_scenario.get(scenario_key or "")
+        if incident:
+            container["incident_id"] = str(incident.id)
+            container["notification"] = _delivery_summary(db, incident)
+            container["evidence"] = _evidence_summary(db, incident)
+    for incident in incidents:
+        containers.append({
+            "id": str(incident.id),
+            "name": incident.affected_service or incident.title,
+            "status": "SIMULATED",
+            "labels": {"kibolens.simulated": "true", "kibolens.scenario": (incident.alert_fingerprint or "").removeprefix("simulation:")},
+            "exit_code": None,
+            "logs": incident.description,
+            "incident_id": str(incident.id),
+            "notification": _delivery_summary(db, incident),
+            "evidence": _evidence_summary(db, incident),
+        })
     return containers
 
 
@@ -66,23 +131,34 @@ async def lab_status(user: CurrentUser, db: Session = Depends(get_db)) -> list[d
 async def start_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, request: LabStartRequest | None = None, db: Session = Depends(get_db)) -> dict:
     _admin(user)
     request = request or LabStartRequest()
-    synthetic = SCENARIO_BY_KEY.get(scenario)
+    synthetic = SCENARIO_BY_KEY.get(scenario) if not request or not request.physical else None
     if synthetic:
         service = IncidentService(db)
         incident = service.process_alert(make_alert(synthetic))
+        evidence_type = (
+            "HOST_METRIC"
+            if synthetic.resource == "kibo-host"
+            else "CONTAINER_STATE"
+            if synthetic.key.startswith("container-")
+            else "SYSTEM_EVENT"
+        )
+        observed_at = datetime.now(timezone.utc)
         service.capture_evidence(
             incident.id,
-            "SYSTEM_EVENT",
+            evidence_type,
             source="simulation",
             resource_identifier=synthetic.resource,
             metric_name=synthetic.metric_name,
             metric_value=synthetic.metric_value,
             unit=synthetic.unit,
+            observed_at=observed_at,
             metadata={
                 "simulated": True,
                 "scenario": synthetic.key,
                 "threshold": synthetic.threshold,
                 "logs": synthetic.logs,
+                "source": "failure_lab",
+                "is_simulated": True,
             },
         )
         service.capture_evidence(
@@ -90,17 +166,30 @@ async def start_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, request
             "LOG_EXCERPT",
             source="simulation",
             resource_identifier=synthetic.resource,
+            observed_at=observed_at,
             metadata={"simulated": True, "logs": synthetic.logs},
         )
         settings = get_settings()
-        if request.notify_test_recipients:
-            await notify_incident(db, incident, "firing", settings, sorted(settings.get_incident_test_recipient_emails()))
+        # Failure Lab incidents always use the configured owner list. This is
+        # deliberately independent of the signed-in administrator and the old
+        # client-side notify_account flag.
+        results = await notify_incident(db, incident, "firing", settings)
+        notification = {
+            "requested": bool(settings.get_incident_notification_emails()),
+            "recipients": settings.get_incident_notification_emails(),
+            "status": results[0]["status"] if results else "not_configured",
+            "detail": results[0].get("error") if results else None,
+            "delivery_results": results,
+        }
         db.commit()
-        return {"name": synthetic.key, "status": "SIMULATED", "simulated": True, "incident_id": str(incident.id)}
+        return {"name": synthetic.key, "status": "SIMULATED", "simulated": True, "incident_id": str(incident.id), "notification": notification}
     physical_map = {"container-crash": "crasher", "container-restart-loop": "restart-loop", "container-unhealthy": "unhealthy", "application-config-failure": "config-error"}
     scenario = physical_map.get(scenario, scenario) if request.physical else scenario
     try:
-        return await DockerLabController(get_settings().docker_socket_path).start(scenario, healthy=request.healthy)
+        result = await DockerLabController(get_settings().docker_socket_path).start(
+            scenario, healthy=request.healthy, notify_account=True
+        )
+        return {**result, "notification": {"requested": True, "status": "pending"}}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -114,23 +203,12 @@ async def stop_lab(scenario: str, user: CurrentUser, csrf: CsrfSession, db: Sess
         incident = db.scalar(select(Incident).where(Incident.alert_fingerprint == f"simulation:{scenario}", Incident.status.in_(["DETECTED", "INVESTIGATING", "IDENTIFIED", "RESOLVING"])))
         if incident:
             resolved = service.process_alert(make_alert(synthetic, status="resolved"))
-            await notify_incident(db, resolved, "resolved", get_settings(), sorted(get_settings().get_incident_test_recipient_emails()))
+            await notify_incident(db, resolved, "resolved", get_settings())
             db.commit()
         return {"stopped": bool(incident), "simulated": True}
     physical_map = {"container-crash": "crasher", "container-restart-loop": "restart-loop", "container-unhealthy": "unhealthy", "application-config-failure": "config-error"}
     try:
         return {"stopped": await DockerLabController(get_settings().docker_socket_path).stop(physical_map.get(scenario, scenario))}
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/{scenario}/recover")
-async def recover_lab(scenario: str, user: CurrentUser, csrf: CsrfSession) -> dict:
-    _admin(user)
-    if scenario != "interview-demo":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only the interview demo supports controlled recovery.")
-    try:
-        return await DockerLabController(get_settings().docker_socket_path).start(scenario, healthy=True)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
