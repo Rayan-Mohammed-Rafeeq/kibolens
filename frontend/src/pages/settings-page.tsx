@@ -20,12 +20,12 @@ export function SettingsPage() {
       client.invalidateQueries({ queryKey: ["settings"] });
     },
   });
-  if (settings.isLoading) return <section className="mx-auto max-w-5xl"><p className="text-zinc-400">Loading settings…</p></section>;
-  if (settings.isError || !settings.data) return <section className="mx-auto max-w-5xl"><p className="rounded-lg border border-red-400/25 bg-red-400/10 p-4 text-red-200">Could not load settings: {(settings.error as Error)?.message}</p></section>;
+  if (settings.isLoading) return <section className="page-shell"><p className="page-eyebrow">Operations</p><div className="mt-8 grid gap-4 md:grid-cols-2"><div className="h-48 animate-pulse rounded-2xl bg-slate-800/50" /><div className="h-48 animate-pulse rounded-2xl bg-slate-800/50" /></div></section>;
+  if (settings.isError || !settings.data) return <section className="page-shell"><p className="panel p-4 text-red-200">Could not load settings: {(settings.error as Error)?.message}</p></section>;
   const data = settings.data;
   const notifications = data.notifications;
-  return <section className="mx-auto max-w-5xl">
-    <p className="text-sm font-medium text-cyan-300">Operations</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Settings</h1><p className="mt-2 text-zinc-400">Operational configuration, provider status and account notification controls.</p>
+  return <section className="page-shell">
+     <p className="page-eyebrow">Operations</p><h1 className="page-title">Settings</h1><p className="page-subtitle">Operational configuration, provider status and account notification controls.</p>
     <div className="mt-6 grid gap-4 md:grid-cols-2">
       <Panel title="AI routing"><p>Order: {data.ai.provider_order.join(" → ")}</p><p>Free-only: {data.ai.free_only ? "enabled" : "disabled"}</p>{Object.entries(data.ai.router.providers).map(([name, provider]) => <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-3" key={name}><span>{name}</span><span className={provider.available && provider.api_reachable ? "text-emerald-300" : "text-amber-300"}>{provider.available && provider.api_reachable ? <CheckCircle2 className="inline" size={15} /> : <CircleAlert className="inline" size={15} />} {provider.available ? `${provider.text_models_count} eligible models` : "not configured"}</span></div>)}</Panel>
       <Panel title="Monitoring"><p>Prometheus: {data.monitoring.prometheus_url}</p><p>Stale after: {data.monitoring.stale_after_seconds}s</p><p>Environment: {data.environment}</p></Panel>
@@ -47,4 +47,4 @@ export function SettingsPage() {
   </section>;
 }
 
-function Panel({ title, children }: { title: string; children: ReactNode }) { return <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5"><h2 className="font-medium">{title}</h2><div className="mt-4 space-y-2 text-sm text-zinc-400">{children}</div></section>; }
+function Panel({ title, children }: { title: string; children: ReactNode }) { return <section className="panel panel-hover p-5"><h2 className="section-heading">{title}</h2><div className="mt-5 space-y-3 text-sm text-slate-400">{children}</div></section>; }

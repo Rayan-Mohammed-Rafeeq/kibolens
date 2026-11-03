@@ -32,26 +32,26 @@ export function InfrastructurePage() {
     enabled: Boolean(selected),
   });
 
-  return <section className="mx-auto max-w-6xl">
-    <p className="text-sm font-medium text-cyan-300">Infrastructure</p>
-    <h1 className="mt-2 text-3xl font-semibold tracking-tight">Telemetry, containers and virtual machines</h1>
-    <p className="mt-2 text-zinc-400">One canonical container record per Docker ID, merged from Docker, Compose, cAdvisor and Prometheus. Docker health and telemetry availability are reported separately.</p>
+  return <section className="page-shell">
+    <p className="page-eyebrow">Infrastructure</p>
+    <h1 className="page-title">Telemetry command center</h1>
+    <p className="page-subtitle">One canonical container record per Docker ID, merged from Docker, Compose, cAdvisor and Prometheus.</p>
 
     <div className="mt-8 grid gap-4 lg:grid-cols-2">
       <HistoryChart title="CPU utilization" history={cpu.data} loading={cpu.isLoading} />
       <HistoryChart title="Memory utilization" history={memory.data} loading={memory.isLoading} />
     </div>
 
-    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40">
-      <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Container inventory</h2><span className="ml-auto text-xs text-zinc-500">{containers.isLoading ? "Loading inventory…" : `${totalContainers} Docker container(s)`}</span></header>
+    <section className="panel mt-8 overflow-hidden">
+      <header className="flex flex-wrap items-center gap-2 border-b border-slate-800/80 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="section-heading">Container inventory</h2><span className="ml-auto text-xs text-slate-500">{containers.isLoading ? "Loading inventory…" : `${totalContainers} Docker container(s)`}</span></header>
       {containers.isLoading && !containers.data ? <div className="space-y-3 p-5"><InventorySkeleton /><InventorySkeleton /><InventorySkeleton /></div> : containers.isError ? <div className="p-5"><p className="text-sm text-red-300">Docker inventory could not be loaded.</p><p className="mt-1 text-xs text-zinc-500">{(containers.error as Error).message}</p></div> : totalContainers ? <><div className="divide-y divide-zinc-800">{pageItems.map((container) => <ContainerRow key={container.id ?? container.name} container={container} selected={container.id === selectedId} onSelect={() => setSelectedId(container.id === selectedId ? null : container.id)} />)}</div><div className="flex items-center justify-between border-t border-zinc-800 px-5 py-3 text-xs text-zinc-500"><span>Page {page} of {pageCount}</span><div className="flex gap-2"><button type="button" aria-label="Previous container page" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="rounded border border-zinc-700 p-1.5 hover:border-cyan-400 disabled:opacity-30"><ChevronLeft size={15} /></button><button type="button" aria-label="Next container page" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page === pageCount} className="rounded border border-zinc-700 p-1.5 hover:border-cyan-400 disabled:opacity-30"><ChevronRight size={15} /></button></div></div></> : <p className="p-5 text-sm text-zinc-500">No containers found. Docker may be unavailable or no containers are currently running.</p>}
       {containers.isFetching && !containers.isLoading && <p className="border-t border-zinc-800 px-5 py-2 text-xs text-cyan-300">Refreshing inventory in the background…</p>}
     </section>
 
      {selected && <ContainerDetails container={{ ...selected, ...(selectedDetails.data ?? {}) }} incidents={relatedIncidents.data?.incidents ?? []} incidentsLoading={relatedIncidents.isLoading} />}
 
-    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40">
-      <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="font-medium">Virtual machines</h2></header>
+     <section className="panel mt-6 overflow-hidden">
+       <header className="flex items-center gap-2 border-b border-slate-800/80 px-5 py-4"><Server size={17} className="text-cyan-300" /><h2 className="section-heading">Virtual machines</h2></header>
       <div className="p-5">
         <p className="text-sm font-medium text-zinc-300">Virtual machine monitoring is not currently enabled</p>
         <p className="mt-1 text-sm text-zinc-500">VM monitoring is planned for a future release. Your Docker containers and host infrastructure continue to be monitored normally.</p>

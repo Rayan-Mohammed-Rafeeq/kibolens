@@ -96,12 +96,13 @@ export function LoginPage() {
   }
   
   return (
-    <main className="grid min-h-screen place-items-center bg-zinc-950 p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900/60 p-7 shadow-2xl">
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#070b14] p-6">
+      <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" /><div className="pointer-events-none absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
+      <div className="relative w-full max-w-md rounded-2xl border border-slate-700/50 bg-slate-900/75 p-8 shadow-2xl shadow-black/40 backdrop-blur-xl">
         {/* Header */}
         <div className="mb-7">
           <img src="/brand/kibolens-wordmark.svg" alt="KiboLens" className="mb-5 h-12 w-auto" />
-          <h1 className="text-2xl font-semibold">
+           <p className="page-eyebrow">Secure operations workspace</p><h1 className="mt-4 text-3xl font-semibold tracking-tight">
             {stage === "credentials" ? "Welcome to KiboLens" : "Verify your identity"}
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
@@ -120,7 +121,7 @@ export function LoginPage() {
               <div className="relative mt-2">
                 <input
                   aria-label="Email"
-                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2.5 pl-10 outline-none focus:border-cyan-400"
+                   className="field-control w-full px-3 py-2.5 pl-10"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -136,7 +137,7 @@ export function LoginPage() {
               <div className="relative mt-2">
                 <input
                   aria-label="Password"
-                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2.5 pr-11 outline-none focus:border-cyan-400"
+                   className="field-control w-full px-3 py-2.5 pr-11"
                   type={passwordVisible ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -161,7 +162,7 @@ export function LoginPage() {
             )}
             
             <button
-              className="mt-6 w-full rounded-md bg-cyan-400 px-4 py-2.5 font-medium text-zinc-950 transition-opacity hover:bg-cyan-300 disabled:opacity-60"
+               className="btn-primary mt-6 w-full py-3"
               disabled={submitting}
             >
               {submitting ? "Sending code…" : "Send verification code"}
@@ -176,7 +177,7 @@ export function LoginPage() {
               Verification code
               <input
                 aria-label="6-digit verification code"
-                className="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-center text-2xl font-mono tracking-widest outline-none focus:border-cyan-400"
+                 className="field-control mt-2 w-full px-3 py-2.5 text-center text-2xl font-mono tracking-widest"
                 type="text"
                 inputMode="numeric"
                 pattern="[0-9]{6}"
@@ -200,7 +201,7 @@ export function LoginPage() {
             )}
             
             <button
-              className="mt-6 w-full rounded-md bg-cyan-400 px-4 py-2.5 font-medium text-zinc-950 transition-opacity hover:bg-cyan-300 disabled:opacity-60"
+               className="btn-primary mt-6 w-full py-3"
               disabled={submitting || otp.length !== 6}
             >
               {submitting ? "Verifying…" : "Verify and sign in"}

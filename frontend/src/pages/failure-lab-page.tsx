@@ -20,11 +20,11 @@ export function FailureLabPage() {
   const reset = useMutation({ mutationFn: labService.reset, onSuccess: () => client.invalidateQueries({ queryKey: ["lab-status"] }) });
   const active = new Map((status.data ?? []).map((item) => [item.labels?.["kibolens.scenario"] ?? item.labels?.["kibolens.lab.scenario"] ?? item.name.replace("kibolens-lab-", ""), item]));
 
-  return <section className="mx-auto max-w-6xl">
-    <p className="text-sm font-medium text-cyan-300">Controlled experiments</p>
-    <h1 className="mt-2 text-3xl font-semibold tracking-tight">Failure Lab / Demo Simulation</h1>
-    <p className="mt-2 max-w-3xl text-zinc-400">Controlled experiments exercise incident creation, owner notification and AI investigation without stressing production. Physical Docker scenarios are limited to labeled resources.</p>
-    <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-200">
+  return <section className="page-shell">
+    <p className="page-eyebrow">Controlled experiments</p>
+    <h1 className="page-title">Failure Lab</h1>
+    <p className="page-subtitle">Exercise incident creation, owner notification and AI investigation without stressing production. Physical Docker scenarios are limited to labeled resources.</p>
+    <div className="panel mt-8 flex flex-wrap items-center gap-4 border-amber-400/20 bg-amber-400/[.04] p-4 text-sm text-amber-200">
       <ShieldCheck size={17} />
       <span>Administrator-only and CSRF-protected.</span>
       <span className="text-cyan-200">Eligible experiments automatically notify both configured server owners.</span>
@@ -38,7 +38,7 @@ export function FailureLabPage() {
         const item = active.get(scenario);
         const usePhysical = physical && physicalScenarioKeys.has(scenario);
         const definition = scenarios.data?.find((entry) => entry.key === scenario);
-        return <article className="flex min-h-[235px] flex-col rounded-xl border border-zinc-800 bg-zinc-900/40 p-5 transition-colors hover:border-zinc-700" key={scenario}>
+        return <article className="panel panel-hover flex min-h-[235px] flex-col p-5" key={scenario}>
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${definition?.severity === "CRITICAL" ? "bg-red-400" : definition?.severity === "HIGH" ? "bg-orange-400" : "bg-amber-300"}`} /><h2 className="font-medium text-zinc-100">{definition?.title ?? scenario.replaceAll("-", " ")}</h2></div>

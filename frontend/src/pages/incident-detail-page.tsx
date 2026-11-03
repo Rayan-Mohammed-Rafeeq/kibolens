@@ -102,14 +102,14 @@ export function IncidentDetailPage() {
   const validNextStatuses = VALID_TRANSITIONS[incident.status as IncidentStatus] || [];
 
   return (
-    <section className="mx-auto max-w-5xl">
+    <section className="page-shell max-w-5xl">
       {/* Header */}
       <Link to="/incidents" className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white">
         <ArrowLeft size={16} />
         Back to incidents
       </Link>
 
-      <div className="mt-4 flex items-start justify-between gap-4">
+       <div className="panel mt-6 flex items-start justify-between gap-4 p-6">
         <div>
             <p className="font-mono text-sm text-cyan-400">{incident.incident_number} {incident.source === "simulation" && <span className="ml-2 rounded bg-fuchsia-400/15 px-2 py-0.5 text-xs text-fuchsia-200">SIMULATED</span>}</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{incident.title}</h1>
@@ -124,8 +124,8 @@ export function IncidentDetailPage() {
       </div>
 
       {/* Overview */}
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
+       <div className="mt-6 grid gap-4 md:grid-cols-2">
+         <div className="panel p-5">
           <h2 className="text-sm font-medium text-zinc-400">Affected Resources</h2>
           <div className="mt-3 space-y-2">
             {incident.affected_service && (
@@ -143,7 +143,7 @@ export function IncidentDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
+         <div className="panel p-5">
           <h2 className="text-sm font-medium text-zinc-400">Timeline</h2>
           <div className="mt-3 space-y-2 text-sm">
             <div className="flex justify-between">
@@ -165,8 +165,8 @@ export function IncidentDetailPage() {
       </div>
 
       {/* Actions */}
-      <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="font-medium">Actions</h2>
+       <div className="panel mt-6 p-5">
+         <h2 className="section-heading">Incident actions</h2>
         <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-4">
           <label className="block text-sm text-zinc-300">Investigate with AI</label>
           <div className="mt-2 flex gap-2"><input value={investigationQuestion} onChange={(event) => setInvestigationQuestion(event.target.value)} className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm" /><button onClick={() => investigateMutation.mutate()} disabled={investigateMutation.isPending || !investigationQuestion.trim()} className="rounded-md bg-cyan-400 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-50">{investigateMutation.isPending ? "Investigating…" : "Investigate"}</button></div>
@@ -292,9 +292,9 @@ export function IncidentDetailPage() {
       </div>
 
       {/* Evidence */}
-      {evidence.length > 0 && (
-        <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
-          <h2 className="font-medium">Evidence</h2>
+       {evidence.length > 0 && (
+         <div className="panel mt-6 p-5">
+           <h2 className="section-heading">Evidence</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {evidence.map((item) => (
               <div key={item.id} className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-3">
@@ -325,8 +325,8 @@ export function IncidentDetailPage() {
       )}
 
       {/* Event Timeline */}
-      <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="font-medium">Event Timeline</h2>
+       <div className="panel mt-6 p-5">
+         <h2 className="section-heading">Event timeline</h2>
         <div className="mt-4 space-y-3">
           {events.length === 0 ? (
             <p className="text-sm text-zinc-500">No events recorded</p>

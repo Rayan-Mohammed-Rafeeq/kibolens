@@ -126,3 +126,7 @@ Desktop.ini
 deployment/.env
 deployment/.env.*
 !deployment/.env.example
+
+# ---------- AI Agent and IDE local files ----------
+.agents/
+.opencode/

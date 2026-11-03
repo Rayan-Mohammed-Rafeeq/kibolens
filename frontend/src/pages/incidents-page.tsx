@@ -30,11 +30,11 @@ export function IncidentsPage() {
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
 
   return (
-    <section className="mx-auto max-w-7xl">
+    <section className="page-shell">
       <div className="flex items-end justify-between">
         <div>
-          <p className="text-sm font-medium text-cyan-300">Incident management</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Incidents</h1>
+          <p className="page-eyebrow">Incident management</p>
+          <h1 className="page-title">Incidents</h1>
           <p className="mt-2 text-zinc-400">
             {data ? `${data.total} total incident${data.total !== 1 ? "s" : ""}` : "Loading incidents..."}
           </p>
@@ -42,7 +42,7 @@ export function IncidentsPage() {
       </div>
 
       {/* Filters */}
-      <div className="mt-6 flex flex-wrap gap-3">
+      <div className="panel mt-8 flex flex-wrap gap-3 p-4">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
           <input
@@ -53,7 +53,7 @@ export function IncidentsPage() {
               setSearch(e.target.value);
               setPage(1);
             }}
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/40 py-2 pl-10 pr-4 text-sm outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/50"
+            className="field-control w-full py-2 pl-10 pr-4 text-sm"
           />
         </div>
 
@@ -63,7 +63,7 @@ export function IncidentsPage() {
             setSeverityFilter(e.target.value as IncidentSeverity | "");
             setPage(1);
           }}
-          className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-2 text-sm outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/50"
+          className="field-control px-4 py-2 text-sm"
         >
           <option value="">All severities</option>
           <option value="CRITICAL">Critical</option>
@@ -78,7 +78,7 @@ export function IncidentsPage() {
             setStatusFilter(e.target.value as IncidentStatus | "");
             setPage(1);
           }}
-          className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-2 text-sm outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/50"
+          className="field-control px-4 py-2 text-sm"
         >
           <option value="">All statuses</option>
           <option value="DETECTED">Detected</option>
@@ -124,10 +124,10 @@ export function IncidentsPage() {
       {/* Incidents table */}
       {data && data.incidents.length > 0 && (
         <>
-          <div className="mt-6 overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-900/40">
+          <div className="panel mt-6 overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-zinc-800 text-left text-sm text-zinc-400">
+                <tr className="border-b border-slate-800 text-left text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-3 font-medium">Reference</th>
                   <th className="px-4 py-3 font-medium">Title</th>
                   <th className="px-4 py-3 font-medium">Severity</th>
@@ -140,7 +140,7 @@ export function IncidentsPage() {
                 {data.incidents.map((incident) => (
                   <tr
                     key={incident.id}
-                    className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800/50 transition-colors"
+                    className="border-b border-slate-800/70 last:border-0 transition-colors hover:bg-cyan-400/[.04]"
                   >
                     <td className="px-4 py-3">
                       <Link
